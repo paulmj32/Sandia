@@ -2,19 +2,20 @@ library(tidyverse)
 library(tidycensus) 
 library(sf)
 library(terra)
+library(stars)
 
-library(lme4)
-options(java.parameters = "-Xmx5g")
-library(bartMachine)
-set_bart_machine_num_cores(4)
+# library(lme4)
+# options(java.parameters = "-Xmx5g")
+# library(bartMachine)
+# set_bart_machine_num_cores(4)
 
 setwd("~/Documents/01_VECTOR.nosync/Sandia")
 
 ##### OUTAGE DATA #############################################
 # Read in data
-#outages_csv = read.csv("SE_states_outage_merra_2018.csv", header = T)
-#save(outages_csv, file = "outages.Rda")
-load(file = "outages.Rda")
+outages_csv = read.csv("./Data/SE_states_outage_merra_2018.csv", header = T)
+save(outages_csv, file = "./Data/outages.Rda")
+load(file = "./Data/outages.Rda")
 
 # Format FIPS to character and include starting zero
 outages_csv$fips_code = as.character(outages_csv$fips_code)
@@ -142,3 +143,74 @@ plot(dem)
 nlcd_path = "./Data/nlcd_2019_land_cover_l48_20210604/nlcd_2019_land_cover_l48_20210604.img"
 nlcd = rast(nlcd_path)
 plot(nlcd)
+
+## Root zone data
+TX_gdb =  "/Users/paulmj/Downloads/gSSURGO_TX/gSSURGO_TX.gdb"
+# TX = sf::st_read(dsn = TX_gdb, layer = "MUPOLYGON")
+# TX_group = TX %>%
+#   group_by(MUKEY) %>%
+#   summarise(n = n())
+# save(TX_group, file = "TX_group.Rda")
+load("Data/TX_group.Rda")
+TX_Valu1 = sf::st_read(dsn = TX_gdb, layer = "Valu1")
+TX_group_val1 = TX_group %>% left_join(TX_Valu1, by = c("MUKEY" = "mukey"))
+
+TX_rast_1k = st_rasterize(TX_group_val1["rootznemc"], dx = 1000, dy = 1000) #1km x 1km resolution 
+TX_rast_100m = st_rasterize(TX_group_val1["rootznemc"], dx = 100, dy = 100) #100m x 100km resolution 
+
+rr = ggplot() + 
+  geom_stars(data = TX_rast_1k, aes(x = x, y = y, fill = rootznemc)) + 
+  scale_fill_viridis_c(direction = -1, na.value = "gray") +
+  theme_minimal()
+rr
+
+st_crs(TX_group_val1)
+TX_map = st_transform(TX_group_val1, crs_map)
+
+### Geometry base - US Counties 
+year=2019
+options(tigris_use_cache = TRUE) #to cache shapefiles for future sessions
+state = "Texas"
+county = c("Harris County")
+
+county_map = get_acs(geography = "county", state = state,
+                     variables=c("B01003_001"), year = year, geometry = TRUE, 
+                     cache_table = TRUE)
+county_map = county_map %>% select(GEOID, NAME) 
+
+census_map = get_acs(geography = "tract", state = state, county = county,
+                     variables=c("B01003_001"), year = year, geometry = TRUE, 
+                     cache_table = TRUE)
+census_map = census_map %>% select(GEOID, NAME) 
+
+
+## PROJECTION (USA Equal Area Conic: EPSG 5070) 
+Houston_census = st_transform(census_map, crs = st_crs(TX_rast_100m))
+TX_rast_100m_crop = st_crop(TX_rast_100m, Houston_census) #crop to Harris county 
+TX_rast_100m_crop_mask = st_crop(TX_rast_100m_crop, Houston_census, crop = FALSE) #mask to Harris county
+
+hh = ggplot() + 
+  geom_stars(data = TX_rast_100m_crop_mask, aes(x = x, y = y, fill = rootznemc)) + 
+  scale_fill_viridis_c(direction = -1, na.value = "transparent") +
+  geom_sf(data = Houston_census, colour = alpha("white", 0.5), fill = NA, size = 0.45) +
+  theme_dark() +
+  labs(title = "Harris County: Root Zone Depth", fill = "Root Zone\n(cm)") + 
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()
+        )
+hh
+
+## TREE DATA
+tree_db = "/Users/paulmj/Downloads/L48_Totals/L48_Totals.gdb"
+st_layers(tree_db)
+
+
+crs_map = st_crs(census_map)
+st_crs(census_map)$IsGeographic  
+st_crs(census_map)$units_gdal
+st_crs(census_map)$proj4string
+
+
+  
+  
