@@ -15,7 +15,7 @@ setwd("~/Documents/01_VECTOR.nosync/Sandia")
 # Read in data
 outages_csv = read.csv("./Data/SE_states_outage_merra_2018.csv", header = T)
 save(outages_csv, file = "./Data/outages.Rda")
-load(file = "./Data/outages.Rda")
+load(file = "Data/outages.Rda")
 
 # Format FIPS to character and include starting zero
 outages_csv$fips_code = as.character(outages_csv$fips_code)
@@ -211,6 +211,15 @@ st_crs(census_map)$IsGeographic
 st_crs(census_map)$units_gdal
 st_crs(census_map)$proj4string
 
+## SOIL MOISTURE
+soil_db = "/Users/paulmj/Downloads/NDLAS_NOAH_2018_monthly/NLDAS_NOAH0125_M.A201801.002.grb"
+asd = read_stars(soil_db, along = "band")
+st_dimensions(asd)
 
-  
-  
+library(rNOMADS)
+GribInfo(soil_db, file.type = "grib1")
+soil0_10 = asd[ , , , 26]
+soil10_40 = asd[ , , , 27]
+soil40_100 = asd[ , , , 28]
+
+
