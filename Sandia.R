@@ -10,6 +10,7 @@ library(stars)
 # set_bart_machine_num_cores(4)
 
 setwd("~/Documents/01_VECTOR.nosync/Sandia")
+mycrs = 5070
 
 ##### CONTIGUOUS US COUNTY MAP ############################################
 year=2019
@@ -22,14 +23,13 @@ county_map = county_map %>%
   mutate(POPULATION = estimate) %>%
   dplyr::select(GEOID, NAME, POPULATION) 
 
-# county map info 
-st_crs(county_map)
-st_crs(county_map)$IsGeographic  
-st_crs(county_map)$units_gdal
-st_crs(county_map)$proj4string
+# # county map info 
+# st_crs(county_map)
+# st_crs(county_map)$IsGeographic  
+# st_crs(county_map)$units_gdal
+# st_crs(county_map)$proj4string
 
 ## Project county map and calculate area and population density of each county 
-mycrs = 5070
 county_map_proj = county_map %>% 
   st_transform(mycrs) # project to Conic Equal Area Albers, EPSG:5070 
 
@@ -50,70 +50,11 @@ gg
 dev.off()
 
 ##### STATIC VARIABLES ##############################################################
-## NLCD land use
-nlcd_path = "./Data/nlcd_2019_land_cover_l48_20210604/nlcd_2019_land_cover_l48_20210604.img"
+## NLCD
 
+## DEM
 
-## DEM Data
-# https://www.usgs.gov/centers/eros/science/usgs-eros-archive-digital-elevation-global-multi-resolution-terrain-elevation?qt-science_center_objects=0#qt-science_center_objects
-# go to EarthExplorer, Data Sets, Digital Elevation, GTOPO30, Results 
-# download which sections you want 
-dem_se_path = "./Data/gt30w100n40_dem/gt30w100n40.dem"
-dem_ne_path = "./Data/gt30w100n90_dem/gt30w100n90.dem"
-dem_sw_path = "./Data/gt30w140n40_dem/gt30w140n40.dem"
-dem_nw_path = "./Data/gt30w140n90_dem/gt30w140n90.dem"
-
-# load in rasters
-dem_se = rast(dem_se_path)
-dem_ne = rast(dem_ne_path)
-dem_sw = rast(dem_sw_path)
-dem_nw = rast(dem_nw_path)
-
-# merge rasters
-dem_merge1 = merge(dem_se, dem_ne)
-dem_merge2 = merge(dem_merge1, dem_sw)
-dem_merge3 = merge(dem_merge2, dem_nw)
-
-# project to coordinate system of county shapefile
-dem_proj = terra::project(dem_merge3, paste("EPSG:", mycrs) )
-
-# crop extent to shapefile
-dem_crop = crop(dem_proj, vect(county_map_proj))
-
-# mask values to shapefile (i.e., anything outside is NA) 
-dem_final = mask(dem_crop, vect(county_map_proj))
-
-# spatially join to put county GEO on raster 
-
-# extract values for each county
-dem_extract = terra::extract(x = dem_final, y = vect(county_map_area))
-dem_extract_summ = dem_extract %>%
-  group_by(ID) %>%
-  summarize(DEM_mean = mean(gt30w100n40, na.rm = TRUE))
-
-# join DEM to counties (bind columns because no GEOID in raster but order is preserved when extracting)
-county_map_static = county_map_area %>%
-  bind_cols(dem_extract_summ)
-
-gg2 = ggplot(county_map_static)+
-  geom_sf(aes(fill = DEM_mean), color = NA) + 
-  scale_fill_viridis_c(option="plasma", na.value = "grey50") +
-  #geom_sf(fill = NA, show.legend = F, color = "black", lwd = 0.005)+
-  #coord_sf(datum = NA) + #removes gridlines 
-  #guides(fill = "none") + #removes legend
-  theme_minimal()  #removes background
-pdf("figure_dem.pdf", width = 7.48, height = 4.5)
-gg2
-dev.off()
-
-
-
-plot(dem_final)
-methods(class = class(dem_final))
-dem_rast = as.raster(dem_final)
-
-
-
+## Root Zone 
 
 
 
