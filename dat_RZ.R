@@ -29,4 +29,3 @@ for (i in try_list){
   write_stars(temp_ras, dsn = temp_write) # write raster in working directory 
 }
 
-
