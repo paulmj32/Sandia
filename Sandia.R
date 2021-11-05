@@ -15,7 +15,7 @@ mycrs = 5070
 ##### CONTIGUOUS US COUNTY MAP ############################################
 year=2019
 options(tigris_use_cache = TRUE) #to cache shapefiles for future sessions
-state_list = c("AL", "AR", "AZ", "CA", "CO", "CT", "DE", "FL", "GA", "IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MI", "MN", "MO", "MP", "MS", "MT", "NC", "ND", "NE", "NH", "NJ", "NM", "NV", "NY", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VI", "VT", "WA", "WI", "WV", "WY")
+state_list = c("AL", "AR", "AZ", "CA", "CO", "CT", "DE", "FL", "GA", "IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MI", "MN", "MO", "MS", "MT", "NC", "ND", "NE", "NH", "NJ", "NM", "NV", "NY", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VT", "WA", "WI", "WV", "WY")
 county_map = get_acs(geography = "county", state = state_list,
                      variables=c("B01003_001"), year = year, geometry = TRUE, 
                      cache_table = TRUE)
@@ -185,7 +185,7 @@ county_map = get_acs(geography = "county",
 
 ## Root zone data
 TX_gdb =  "/Users/paulmj/Downloads/gSSURGO_TX/gSSURGO_TX.gdb"
-# TX = sf::st_read(dsn = TX_gdb, layer = "MUPOLYGON")
+# TX = sf::st_read(dsn = TX_gbd_ext, layer = "MUPOLYGON")
 # TX_group = TX %>%
 #   group_by(MUKEY) %>%
 #   summarise(n = n())
