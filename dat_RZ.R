@@ -11,7 +11,8 @@
 #                            layer = "MUPOLYGON")
 
 
-try_list = state_list[3:32]
+try_list = state_list[48]
+
 # Iterate: read in state shapefile from state_list, group by key, join value table, rasterize, save raster 
 for (i in try_list){
   print(i)
@@ -27,5 +28,8 @@ for (i in try_list){
   #temp_ras= st_rasterize(temp_join["rootznemc"], dx = 1000, dy = 1000) #1000m x 1000km resolution raster
   #temp_write = paste(i, "_rootznemc1000.tif", sep = "") #name of raster
   write_stars(temp_ras, dsn = temp_write) # write raster in working directory 
+  rm(temp_gdb, temp_sf, temp_group, temp_val, temp_join, temp_ras) #clear working environment (for speed) 
 }
 
+asd = read_stars('/Users/paulmj/Downloads/July2020_gSSURGO_by_State/gSSURGO_WY/WY_rootznemc100.tif')
+plot(asd)
