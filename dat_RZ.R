@@ -2,6 +2,7 @@
 # https://www.nrcs.usda.gov/wps/portal/nrcs/detail/soils/survey/geo/?cid=nrcs142p2_053628
 # https://gdg.sc.egov.usda.gov/GDGHome_DirectDownLoad.aspx --> soil geographic database 
 
+
 # NOTE: Too large to read in CONUS dataset (8GB Mac) ... need to run for each state 
 # RZ_conus_gdb =  "/Users/paulmj/Downloads/gSSURGO_CONUS/gSSURGO_CONUS.gdb"
 # RZ_conus = sf::st_read(dsn = RZ_conus_gdb, layer = "MUPOLYGON")
@@ -10,10 +11,9 @@
 #                            query = 'SELECT * FROM "MUPOLYGON" WHERE FID = 1',
 #                            layer = "MUPOLYGON")
 
-
-try_list = state_list[48]
-
-# Iterate: read in state shapefile from state_list, group by key, join value table, rasterize, save raster 
+## Iterate raster processing instead  
+# Read in state shapefile from state_list, group by key, join value table, rasterize, save raster 
+try_list = state_list[1:48]
 for (i in try_list){
   print(i)
   temp_wd = paste("/Users/paulmj/Downloads/July2020_gSSURGO_by_State/gSSURGO_", i, sep = "")   # change working directory to file 
@@ -31,5 +31,53 @@ for (i in try_list){
   rm(temp_gdb, temp_sf, temp_group, temp_val, temp_join, temp_ras) #clear working environment (for speed) 
 }
 
-asd = read_stars('/Users/paulmj/Downloads/July2020_gSSURGO_by_State/gSSURGO_WY/WY_rootznemc100.tif')
-plot(asd)
+## Merge rasters 
+# https://stackoverflow.com/questions/50234139/using-mosaic-in-r-for-merge-multiple-geotiff
+rast.names = list.files(path = "./Data/rootzone_rasters", full.names = T) # get file names 
+rast.list = lapply(rast.names, rast) # read rasters into list 
+rast.merge = do.call(merge, rast.list) #use do.call to merge them all at once 
+#writeRaster(rast.merge, filename = "./rastmerge.tif")
+
+# project to coordinate system of county shapefile
+rz_proj = terra::project(rast.merge, paste("EPSG:", mycrs))
+
+# crop extent to shapefile
+rz_crop = crop(rz_proj, vect(county_map_proj))
+
+# mask values to shapefile (i.e., anything outside is NA) 
+rz_final = mask(rz_crop, vect(county_map_proj))
+
+# extract values for each county
+rz_extract = terra::extract(x = rz_final, y = vect(county_map_proj))
+#save(rz_extract, file = "./Data/rz_extract.Rda")
+load(file = "./Data/rz_extract.Rda")
+
+# function for mode
+mode = function(x) {
+  ux = na.omit(unique(x) )
+  tab = tabulate(match(x, ux)); ux[tab == max(tab)]
+}
+
+# group extracted data 
+rz_extract_group = rz_extract %>%
+  group_by(ID) %>%
+  summarize(RZ_mean = mean(AL_rootznemc100, na.rm = TRUE),
+            RZ_med = median(AL_rootznemc100, na.rm = TRUE),
+            RZ_mode = mode(AL_rootznemc100)
+            )
+
+# join data to counties (bind columns because no GEOID in raster but order is preserved when extracting)
+county_map_rz = county_map_proj %>%
+  bind_cols(rz_extract_group)
+#save(county_map_rz, file = "county_map_rz.Rda")
+
+# gg2 = ggplot(county_map_rz)+
+#   geom_sf(aes(fill = RZ_mean), color = NA) +
+#   scale_fill_viridis_c(option="plasma", na.value = "grey50") +
+#   #geom_sf(fill = NA, show.legend = F, color = "black", lwd = 0.005)+
+#   #coord_sf(datum = NA) + #removes gridlines
+#   #guides(fill = "none") + #removes legend
+#   theme_minimal()  #removes background
+# pdf("figure_rz.pdf", width = 7.48, height = 4.5)
+# gg2
+# dev.off()
