@@ -12,7 +12,7 @@ library(stars)
 setwd("~/Documents/01_VECTOR.nosync/Sandia")
 mycrs = 5070
 
-##### CONTIGUOUS US COUNTY MAP ############################################
+##### CONTIGUOUS US COUNTY MAP ######################################################
 year=2019
 options(tigris_use_cache = TRUE) #to cache shapefiles for future sessions
 state_list = c("AL", "AR", "AZ", "CA", "CO", "CT", "DE", "FL", "GA", "IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MI", "MN", "MO", "MS", "MT", "NC", "ND", "NE", "NH", "NJ", "NM", "NV", "NY", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VT", "WA", "WI", "WV", "WY")
@@ -37,31 +37,61 @@ county_map_area = county_map_proj %>%
   mutate(AREA = as.vector(st_area(county_map_proj))) %>% ## calculate area of each county (sq-meters); as.vector removes units suffix 
   mutate(DENSITY = POPULATION / AREA * 1000^2) #population per sq-km 
 
-gg = ggplot(county_map_area)+
-  geom_sf(aes(fill = DENSITY), color = NA) + 
+##### STATIC VARIABLES ##############################################################
+## NLCD
+load(file = "./Data/county_map_nlcd.Rda")
+county_map_nlcd2 = county_map_nlcd %>%
+  select(GEOID, Barren:Total) %>%
+  st_set_geometry(NULL)
+
+## DEM
+load(file = "./Data/county_map_dem.Rda")
+county_map_dem2 = county_map_dem %>%
+  select(GEOID, DEM_mean:DEM_max) %>%
+  st_set_geometry(NULL)
+
+## Root Zone 
+load(file = "./Data/county_map_rz.Rda")
+county_map_rz2 = county_map_rz %>%
+  select(GEOID, RZ_mean:RZ_mode) %>%
+  st_set_geometry(NULL)
+
+## Join data 
+county_map_static = county_map_area %>%
+  inner_join(county_map_nlcd2, by = "GEOID") %>%
+  inner_join(county_map_dem2, by = "GEOID") %>%
+  inner_join(county_map_rz2, by = "GEOID") %>%
+  select(-Other, -Total)
+#save(county_map_static, file = "./Data/county_map_static.Rda")
+
+#### PLOTS ##########################################################################
+gg = ggplot(county_map_static)+
+  geom_sf(aes(fill = DEM_mean), color = NA) + 
   scale_fill_viridis_c(option="plasma", na.value = "grey50") +
   #geom_sf(fill = NA, show.legend = F, color = "black", lwd = 0.005)+
   #coord_sf(datum = NA) + #removes gridlines 
   #guides(fill = "none") + #removes legend
-  theme_minimal()  #removes background
+  #theme_minimal() +  #removes background
+  theme_dark() +
+  #labs(title = "NLCD Land Use", fill = "Forest\n(prop.)") + 
+  #labs(title = "Root-zone Depth", fill = "Mean (cm)") + 
+  labs(title = "Elevation", fill = "Mean (m)") + 
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()
+  )
 
-pdf("figure_county.pdf", width = 7.48, height = 4.5)
+pdf("US_dem_mean.pdf", width = 7.48, height = 4.5)
 gg
 dev.off()
 
-##### STATIC VARIABLES ##############################################################
-## NLCD
-
-## DEM
-
-## Root Zone 
 
 
 
 ##### OUTAGE DATA #############################################
 # Read in data
-outages_csv = read.csv("./Data/SE_states_outage_merra_2018.csv", header = T)
-save(outages_csv, file = "./Data/outages.Rda")
+#outages_csv = read.csv("./Data/SE_states_outage_merra_2018.csv", header = T)
+#save(outages_csv, file = "./Data/outages.Rda")
 load(file = "Data/outages.Rda")
 
 # Format FIPS to character and include starting zero
@@ -250,7 +280,7 @@ st_crs(census_map)$IsGeographic
 st_crs(census_map)$units_gdal
 st_crs(census_map)$proj4string
 
-## SOIL MOISTURE
+## SOIL MOISTURE (monthly) 
 soil_db = "/Users/paulmj/Downloads/NDLAS_NOAH_2018_monthly/NLDAS_NOAH0125_M.A201801.002.grb"
 asd = read_stars(soil_db, along = "band")
 st_dimensions(asd)
