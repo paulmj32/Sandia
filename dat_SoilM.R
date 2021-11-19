@@ -21,8 +21,8 @@
 grb.names = list.files(path = "/Users/paulmj/Downloads/NLDAS_NOAH_2018_hourly_grb", full.names = T,
                        pattern = "\\.grb$") # get file names and restrict pattern to ending in .grb 
 
-## Iterate through .grb files (takes less memory) 
-for (i in 1:length(grb.names)){
+## Iterate through .grb files (takes less memory) length(grb.names)
+for (i in 745:1416){
   temp_i = grb.names[i]
   print(temp_i)
   
@@ -60,16 +60,23 @@ for (i in 1:length(grb.names)){
   # Add date_hour (character) variable whose value is the file name, formatted to match outage data ("2018-01-01T00:00:00Z")
   temp_name1 = sub(".002.grb", "", sub(".*NLDAS_NOAH0125_H.A", "", temp_i)) #"YYYYMMDD.HHMM"
   temp_name2 = paste(substr(temp_name1, 1, 4), "-", substr(temp_name1, 5, 6), "-", substr(temp_name1, 7, 8), "T", substr(temp_name1, 10, 11), ":", substr(temp_name1, 12, 13), ":00Z", sep = "")
+  temp_day = substr(temp_name2, 1,10)
+  
   temp_out = temp_extract
   temp_out$date_hour = temp_name2
+  temp_out$date_day = temp_day
   
-  # Data-frame of GEOID, date-time (hourly), and 3 soil moisture layer variables 
+  # Data-frame of GEOID, date-time (hourly and daily), and 3 soil moisture layer variables 
   temp_map_soil = county_map_proj %>%
     bind_cols(temp_out) %>%
-    dplyr::select(-ID, -POPULATION) 
+    dplyr::select(-ID, -POPULATION) %>%
+    st_set_geometry(NULL)
   
-  # Use first dataset as output and row bind subsequent datasets to it
-  if (i == 1) {
+  # Use first dataset of each month as starting output and row bind subsequent days to it
+  # if (i == 1) {
+  #   county_map_soil = temp_map_soil
+  # }
+  if (i %in% c(1, 745, 1417, 2161, 2881, 3625, 4345, 5089, 5833, 6553, 7297, 8017)) {
     county_map_soil = temp_map_soil
   }
   else {
@@ -77,23 +84,86 @@ for (i in 1:length(grb.names)){
       bind_rows(temp_map_soil)
   }
   
-  # Save county_map_soil data around every month 
-  if (i %in% 720*1:12) {
-    save(county_map_soil, file = "./Data/county_map_soil.Rda")
+  # Save county_map_soil data at end of every month 
+  if (i == 744) {
+    county_map_soil_jan = county_map_soil
+    save(county_map_soil_jan, file = "./Data/county_map_soil_jan.Rda")
+    rm(county_map_soil, county_map_soil_jan) #clear working environment for speed
   }
+  if (i == 1416) {
+    county_map_soil_feb = county_map_soil
+    save(county_map_soil_feb, file = "./Data/county_map_soil_feb.Rda")
+    rm(county_map_soil, county_map_soil_feb) #clear working environment for speed
+  }
+  if (i == 2160) {
+    county_map_soil_mar = county_map_soil
+    save(county_map_soil_mar, file = "./Data/county_map_soil_mar.Rda")
+    rm(county_map_soil, county_map_soil_mar) #clear working environment for speed
+  }
+  if (i == 2880) {
+    county_map_soil_apr = county_map_soil
+    save(county_map_soil_apr, file = "./Data/county_map_soil_apr.Rda")
+    rm(county_map_soil, county_map_soil_apr) #clear working environment for speed
+  }
+  if (i == 3624) {
+    county_map_soil_may = county_map_soil
+    save(county_map_soil_may, file = "./Data/county_map_soil_may.Rda")
+    rm(county_map_soil, county_map_soil_may) #clear working environment for speed
+  }
+  if (i == 4344) {
+    county_map_soil_jun = county_map_soil
+    save(county_map_soil_jun, file = "./Data/county_map_soil_jun.Rda")
+    rm(county_map_soil, county_map_soil_jun) #clear working environment for speed
+  }
+  if (i == 5088) {
+    county_map_soil_jul = county_map_soil
+    save(county_map_soil_jul, file = "./Data/county_map_soil_jul.Rda")
+    rm(county_map_soil, county_map_soil_jul) #clear working environment for speed
+  }
+  if (i == 5832) {
+    county_map_soil_aug = county_map_soil
+    save(county_map_soil_aug, file = "./Data/county_map_soil_aug.Rda")
+    rm(county_map_soil, county_map_soil_aug) #clear working environment for speed
+  }
+  if (i == 6552) {
+    county_map_soil_sep = county_map_soil
+    save(county_map_soil_sep, file = "./Data/county_map_soil_sep.Rda")
+    rm(county_map_soil, county_map_soil_sep) #clear working environment for speed
+  }
+  if (i == 7296) {
+    county_map_soil_oct = county_map_soil
+    save(county_map_soil_oct, file = "./Data/county_map_soil_oct.Rda")
+    rm(county_map_soil, county_map_soil_oct) #clear working environment for speed
+  }
+  if (i == 8016) {
+    county_map_soil_nov = county_map_soil
+    save(county_map_soil_nov, file = "./Data/county_map_soil_nov.Rda")
+    rm(county_map_soil, county_map_soil_nov) #clear working environment for speed
+  }
+  if (i == 8760) {
+    county_map_soil_dec = county_map_soil
+    save(county_map_soil_dec, file = "./Data/county_map_soil_dec.Rda")
+    rm(county_map_soil, county_map_soil_dec) #clear working environment for speed
+  }
+  
+  # if (i %in% cumsum(c(744, 672, 744, 720, 744, 720, 744, 744, 720, 744, 720, 744))) {
+  #   save(county_map_soil, file = "./Data/county_map_soil.Rda")
+  # }
   
 }
 
+load("./Data/county_map_soil_feb.Rda")
+tail(county_map_soil_feb)
 
-
-
-gg2 = ggplot(county_map_soil)+
-  geom_sf(aes(fill = soil0_10), color = NA) +
-  scale_fill_viridis_c(option="plasma", na.value = "grey50") +
-  #geom_sf(fill = NA, show.legend = F, color = "black", lwd = 0.005)+
-  #coord_sf(datum = NA) + #removes gridlines
-  #guides(fill = "none") + #removes legend
-  theme_minimal()  #removes background
+# asd = county_map_soil_jan %>%
+#   filter(date_hour == temp_name2)
+# gg2 = ggplot(asd)+
+#   geom_sf(aes(fill = soil0_10), color = NA) +
+#   scale_fill_viridis_c(option="plasma", na.value = "grey50") +
+#   #geom_sf(fill = NA, show.legend = F, color = "black", lwd = 0.005)+
+#   #coord_sf(datum = NA) + #removes gridlines
+#   #guides(fill = "none") + #removes legend
+#   theme_minimal()  #removes background
 # pdf("figure_rz.pdf", width = 7.48, height = 4.5)
 # gg2
-# dev.off()
+# # dev.off()
