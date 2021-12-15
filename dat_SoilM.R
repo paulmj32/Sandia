@@ -22,7 +22,7 @@ grb.names = list.files(path = "/Users/paulmj/Downloads/NLDAS_NOAH_2018_hourly_gr
                        pattern = "\\.grb$") # get file names and restrict pattern to ending in .grb 
 
 ## Iterate through .grb files (takes less memory) length(grb.names)
-for (i in 745:1416){
+for (i in 7297:length(grb.names)){
   temp_i = grb.names[i]
   print(temp_i)
   
@@ -145,15 +145,21 @@ for (i in 745:1416){
     save(county_map_soil_dec, file = "./Data/county_map_soil_dec.Rda")
     rm(county_map_soil, county_map_soil_dec) #clear working environment for speed
   }
-  
-  # if (i %in% cumsum(c(744, 672, 744, 720, 744, 720, 744, 744, 720, 744, 720, 744))) {
-  #   save(county_map_soil, file = "./Data/county_map_soil.Rda")
-  # }
-  
 }
 
-load("./Data/county_map_soil_feb.Rda")
-tail(county_map_soil_feb)
+county_map_soil = county_map_soil_jan %>%
+  bind_rows(county_map_soil_feb) %>%
+  bind_rows(county_map_soil_mar) %>%
+  bind_rows(county_map_soil_apr) %>%
+  bind_rows(county_map_soil_may) %>%
+  bind_rows(county_map_soil_jun) %>%
+  bind_rows(county_map_soil_jul) %>%
+  bind_rows(county_map_soil_aug) %>%
+  bind_rows(county_map_soil_sep) %>%
+  bind_rows(county_map_soil_oct) %>%
+  bind_rows(county_map_soil_nov) %>%
+  bind_rows(county_map_soil_dec) 
+save(county_map_soil, file = "./Data/county_map_soil.Rda")
 
 # asd = county_map_soil_jan %>%
 #   filter(date_hour == temp_name2)
