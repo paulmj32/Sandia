@@ -80,10 +80,140 @@ county_map_soil = county_map_soil %>%
   dplyr::select(-NAME, -date_day) #drop NAME and date_day since not using either 
 
 ##### SOCIO-ECONOMIC VARIABLES ###############################################################
+# county factor scores
 load(file = "./Data/county_scores.Rda")
 county_scores = county_scores %>%
   st_set_geometry(NULL) %>%
   dplyr::select(-POPULATION, -NAME)
+
+# factor model 
+load(file = "./Data/factor_model.Rda")
+print(ff5, sort=T, cutoff=0.5)
+
+# county raw data for indicators
+load(file = "./Data/final_data.Rda")
+final_data2 = final_data %>%
+  st_set_geometry(NULL) %>%
+  dplyr::select(c(GEOID ,
+                AMBULANCES , # select all variables not loaded onto one of the five factors
+                BROADBAND ,
+                BUILDING ,
+                BUILDINSP ,
+                BUSINORGS ,
+                BUSISIZE ,
+                CENSRESP ,
+                CHILDCARE ,
+                CIVICS ,
+                CIVILENG ,
+                COLLEGES ,
+                COMMFOOD ,
+                COMMHOUSE ,
+                CROPINS ,
+                DEATHS ,
+                EDEQUITY ,
+                EMPBLDG ,
+                EMPCIVENG ,
+                EMPENVCON ,
+                EMPENVORG ,
+                EMPFIRE ,
+                EMPHIWAY ,
+                EMPHLTH ,
+                EMPINSPECT ,
+                EMPINSUR ,
+                EMPLAND ,
+                EMPLANDSCAPE ,
+                EMPSCIENC ,
+                EMPSPTRN ,
+                EMPSSERVIC ,
+                EMPUNIV ,
+                ENVCONS ,
+                ENVORGS ,
+                FEDEMP ,
+                FIRESTATS ,
+                HAZMIT ,
+                HIGHWYENG ,
+                HOSPBEDS ,
+                HOUSEQUAL ,
+                INTERNET ,
+                LANDARCH ,
+                LANDSUB ,
+                LEGALSERV ,
+                LOCFOOD ,
+                MNTHLTH ,
+                NONPROFITS ,
+                NURSHOMES ,
+                PATTACHIM ,
+                PATTACHRES ,
+                PHYSICIANS ,
+                POPSTAB ,
+                PROFORGS ,
+                PROPINSUR ,
+                PROXCAP ,
+                QAGEWORK ,
+                QED12 ,
+                QEMPL ,
+                QEXTRCT ,
+                QFEMALE ,
+                QFEMLBR ,
+                QGROUPHSE ,
+                QMOHO ,
+                QNATIVE ,
+                QNRRES ,
+                QSERVIND ,
+                RADIO ,
+                RAILMILE ,
+                RECSPORTS ,
+                RELIGAFF ,
+                SCHOOLBUS ,
+                SCHOOLS ,
+                SCISERV ,
+                SPTRANSP ,
+                TELEPHONE ,
+                TELEVISION ,
+                TMPHOUSE ,
+                UTILITYCONS ,
+                WATEFF
+                #WETLAND #already have wetlands
+                )) 
+
+all_soc_dat = county_scores %>%
+  inner_join(final_data2, by = c("GEOID"))
+
+# factor model itself - extend beyond 5 factors 
+finalNA = which(is.na(final_data), arr.ind = T) #check for NAs
+slice = c(finalNA[,1]) #county row index to remove from analysis 
+slice = unique(slice); length(slice)  #remove 75 counties (~2%) 
+scale2 = function(x, na.rm = FALSE) (x - mean(x, na.rm = na.rm)) / sd(x, na.rm) #z-score transform
+scale3 = function(x, na.rm = FALSE) (x - min(x, na.rm = na.rm)) / (max(x, na.rm = na.rm) - min(x, na.rm = na.rm)) #min-max transform
+yy = final_data %>%
+  st_set_geometry(NULL) %>%
+  dplyr::select(-c(GEOID, NAME, POPULATION)) %>% 
+  slice(-slice) %>% #remove NAs
+  #mutate_all(~scale(.)) #this also works 
+  mutate_all(~scale2(., na.rm = TRUE))
+#mutate_all(~scale3(., na.rm = TRUE))
+#mutate_all(list(~scale)) #standardize (mean 0, sd 1) #outdated code
+summary(yy)
+
+library(psych)
+fa.parallel(yy, fm="ml") #parallel analysis and skree plots
+#retain 10 factors based on Kaiser criterion
+ff10 = factanal(yy, factors = 10, rotation = "varimax", scores = "regression") #fits using Maximum Likelihood
+print(ff10, sort=T, cutoff=0.5)
+
+#PCA - just remove all correlation from dataset 
+pc129 = principal(yy, nfactors = 129, rotate = "varimax", scores = TRUE)
+print(pc129, sort=T, cutoff=0.5)
+
+county_pca = final_data %>%
+  st_set_geometry(NULL) %>%
+  dplyr::select(GEOID) %>%
+  slice(-slice) %>%
+  bind_cols(data.frame(pc129$scores))
+county_pca_scores = county_map %>%
+  st_set_geometry(NULL) %>%
+  left_join(county_pca, by = "GEOID") %>% #put back into non-sliced indices
+  dplyr::select(-NAME, -POPULATION)
 
 
 ##### OUTAGE DATA ############################################################################
@@ -104,7 +234,7 @@ county_map_outages = outages_csv %>%
   mutate(date_month = str_extract(date_hour, "^.{7}")) # returns yyyy-mm
 
 # Filter data 
-county_map_outages_filter = county_map_outages %>%
+county_map_outages_only = county_map_outages %>%
   filter(outage_status %in% c("pre", "start", "during", "end")) #filter events flagged as outages
 
 ## Calculate rolling 24-hr lagged min, max, avg, and sd values for all climate variables 
@@ -123,17 +253,19 @@ county_map_outages_filter = county_map_outages %>%
 county_map_join = county_map_area %>%
   inner_join(county_map_outages_only, by = c("GEOID" = "fips_code")) %>% # join outage/hourly weather data 
   left_join(county_map_static, by = c("GEOID")) %>% #join static environmental variables
-  left_join(county_scores, by = c("GEOID")) %>% #join socio-economic variables (Factor Model scores) 
+  #left_join(county_scores, by = c("GEOID")) %>% #join socio-economic variables (Factor Model scores) 
+  #left_join(all_soc_dat, by = c("GEOID")) %>% #5 factors plus remaining variables
+  left_join(county_pca_scores, by = c("GEOID")) %>% #join PCA scores (uncorrelated feature space)
   inner_join(county_map_soil, by = c("GEOID", "date_hour")) %>% #join soil moisture by county and hour time-stamp 
   inner_join(county_map_spi, by = c("GEOID", "date_month")) #join SPI by GEOID and month 
-
 #save(county_map_join, file = "./Data/county_map_join.Rda")
+
 
 # Group by event 
 county_map_group = county_map_join %>%
   st_set_geometry(NULL) %>%
   group_by(outage_number, GEOID) %>%
-  summarise(hours = n(), customers_out = sum(hr_mean_customers_out), customers_out_perc = sum(hr_mean_customers_out) / sum(POPULATION),
+  summarise(hours = n(), customers_out = max(hr_mean_customers_out), customers_out_perc = sum(hr_mean_customers_out) / sum(POPULATION),
             Density = mean(DENSITY), 
             PS_mean = mean(PS), PS_sd = sd(PS), #mean and sd of surface pressure
             SLP_mean = mean(SLP), PS_sd = sd(SLP), # same for sea level pressure
@@ -149,7 +281,9 @@ county_map_group = county_map_join %>%
 
 county_map_group_join = county_map_group %>%
   left_join(county_map_static, by = c("GEOID")) %>% #join static environmental variables
-  left_join(county_scores, by = c("GEOID"))  #join socio-economic variables (Factor Model scores) 
+  #left_join(county_scores, by = c("GEOID")) %>% #join socio-economic variables (Factor Model scores) 
+  #left_join(all_soc_dat, by = c("GEOID")) %>% #5 factors plus remaining variables
+  left_join(county_pca_scores, by = c("GEOID")) #join PCA scores (uncorrelated feature space)
 
 #save(county_map_group_join, file = "./Data/county_map_group_join.Rda")
 #load(file = "./Data/county_map_group_join.Rda")
