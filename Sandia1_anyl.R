@@ -87,10 +87,23 @@ model_name = paste("Large Events - Static and Socio-economic Variables")
 X = df_bart %>%
   dplyr::select(-outage_number, -GEOID, -out_hrs, -out_maxcust, -out_percust) 
 model_name = paste("Large Events - Static, Socio-economic, and Dynamic Variables")
-#3. With soci-economic, static, SPI, Soil Moisture, dynamic weather variables, and max outages (Liu et al. 2007)
+#3. With soci-economic, static, SPI, Soil Moisture, dynamic weather variables, and max outages (Liu et al., 2007)
 X = df_bart %>%
   dplyr::select(-outage_number, -GEOID, -out_hrs, -out_percust) 
 model_name = paste("Large Events - Static, Socio-economic, and Dynamic Variables (with Outages)")
+#4. Two-step model: model forecasted max custmer outages and then use this as an input (Liu et al., 2007)
+# y1 = log(df_bart$out_maxcust)
+# X1 = df_bart %>%
+#   dplyr::select(-outage_number, -GEOID, -out_hrs, -out_maxcust, -out_percust) 
+# bart1 = bartMachine(X1, y1)
+# model_name = paste("Large Events - Customer Outages")
+# y1_predictions = predict(bart1, X1)
+load(file = "y1_predictions.Rda")
+X = df_bart %>%
+  dplyr::select(-outage_number, -GEOID, -out_hrs, -out_percust, -out_maxcust,) %>%
+  bind_cols(data.frame(y1_predictions))
+model_name = paste("Large Events - Static, Socio-economic, and Dynamic Variables (with Frcst Outages)")
+
 
 ### B) Small outage events (<=90th percentile in duration)
 df_bart = data.frame(county_outages_GROUP) %>%
@@ -142,6 +155,7 @@ plot_filtering_estimates2 <- function(df) {
     geom_point(aes(y = actual, colour = "black"), size = 0.55, shape = 16, alpha = 0.9) + #actual observation points
     geom_line(aes(y = Ymean, colour = "blue"), size = 0.55, lty = "solid", alpha = 0.9) + #null model (mean only) 
     ylab("Outage Duration (log hours)") + 
+    #ylab("Max Cust. Outages (log)") + 
     scale_y_continuous(labels = function(x) paste0(x)) +
     xlab("Outage Index (event x county)") +
     ggtitle(model_name) +
@@ -173,8 +187,28 @@ plot_convergence_diagnostics(bart)
 rr = data.frame(as.factor(df_bart$GEOID))
 rr$resid = bart$residuals
 colnames(rr) = c("GEOID", "resid")
-plot(rr) #looks good 
-
+plot(rr) # looks good but use varigoram below to confirm 
+library(gstat)
+mycrs = 5070 #chose projected coordinate system: EPSG 5070 NAD83 Conus Albers
+year=2019 # year for county boundaries 
+options(tigris_use_cache = TRUE) #cache shapefiles for future sessions
+state_list = c("AL", "AR", "AZ", "CA", "CO", "CT", "DE", "FL", "GA", "IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MI", "MN", "MO", "MS", "MT", "NC", "ND", "NE", "NH", "NJ", "NM", "NV", "NY", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VT", "WA", "WI", "WV", "WY")
+county_map = get_acs(geography = "county", state = state_list,
+                     variables=c("B01003_001"), year = year, geometry = TRUE, 
+                     cache_table = TRUE)
+county_map = county_map %>%
+  mutate(POPULATION = estimate) %>%
+  dplyr::select(GEOID, NAME, POPULATION) 
+county_centroid = st_centroid(county_map) # get center of counties 
+county_lonlat = county_centroid %>% 
+  mutate(X = unlist(map(county_centroid$geometry,1)),
+       Y = unlist(map(county_centroid$geometry,2))) %>%
+  dplyr::select(-NAME, -POPULATION) %>%
+  inner_join(rr, by = c("GEOID")) %>%
+  rename(Z = resid)
+county_lonlat_sp = as_Spatial(county_lonlat)
+vgram = variogram(Z~1, county_lonlat_sp)
+plot(vgram)
 
 #### FEATURE SELECTION ##################################################################################
 # Kapelner and Bleich, 2016 
@@ -185,19 +219,48 @@ vs$important_vars_global_se_names
 ii = interaction_investigator(bart, num_replicates_for_avg = 20, num_var_plot = 10, bottom_margin = 15)
 
 ## Model I.A.1
-
+# > vs$important_vars_local_names
+# [1] "soil10_mean"  "soil100_mean" "spi03_mean"   "CROPINS"      "spi24_mean"   "Wetlands"    
+# [7] "MNTHLTH"      "spi12_mean"   "PROXCAP"      "WATEFF"      
+# > vs$important_vars_global_se_names
+# [1] "soil10_mean"  "soil100_mean" "spi03_mean"   "CROPINS"      "spi24_mean"  
 
 ## Model I.A.2
-
-
-# # Model I.A.3
 # > vs$important_vars_local_names
-# [1] "SLP_mean"    "PS_sd"       "out_maxcust" "QV_max"      "V_max"       "T_sd"       
-# [7] "WIND_max"    "U_max"       "TQI_mean"    "TQL_mean"    "PS_mean"     "TQV_mean"   
-# [13] "soil10_mean" "spi03_mean" 
+# [1] "SLP_mean"    "PS_sd"       "QV_max"      "T_sd"        "WIND_max"    "V_max"      
+# [7] "TQI_mean"    "U_max"       "TQL_mean"    "TQV_mean"    "PS_mean"     "spi03_mean" 
+# [13] "T_mean"      "soil10_mean"
 # > vs$important_vars_global_se_names
-# [1] "SLP_mean"    "PS_sd"       "out_maxcust" "QV_max"      "V_max"       "T_sd"       
-# [7] "WIND_max"    "U_max"       "TQL_mean"    "PS_mean"  
+# [1] "SLP_mean"   "PS_sd"      "QV_max"     "T_sd"       "WIND_max"   "V_max"      "TQI_mean"  
+# [8] "U_max"      "spi03_mean"
+
+## Model I.A.3
+# > vs$important_vars_local_names
+# [1] "SLP_mean"    "PS_sd"       "out_maxcust" "V_max"       "QV_max"      "T_sd"       
+# [7] "WIND_max"    "U_max"       "TQI_mean"    "TQL_mean"    "PS_mean"     "spi03_mean" 
+# [13] "TQV_mean"    "CROPINS"    
+# > vs$important_vars_global_se_names
+# [1] "SLP_mean"    "PS_sd"       "out_maxcust" "V_max"       "QV_max"      "T_sd"       
+# [7] "WIND_max"    "U_max"       "TQI_mean"    "TQL_mean"    "spi03_mean" 
+
+## Model I.A.4
+# > vs$important_vars_local_names
+# [1] "SLP_mean"       "PS_sd"          "y1_predictions" "V_max"          "QV_max"        
+# [6] "T_sd"           "WIND_max"       "TQI_mean"       "U_max"          "PS_mean"       
+# [11] "TQL_mean"       "TQV_mean"       "Density"       
+# > vs$important_vars_global_se_names
+# [1] "SLP_mean"       "PS_sd"          "y1_predictions" "V_max"          "QV_max"        
+# [6] "T_sd"           "WIND_max"       "TQI_mean"       "U_max"      
+
+## Model Customer Outages (step 1)
+# > vs$important_vars_local_names
+# [1] "PS_sd"     "SLP_mean"  "TQI_mean"  "WIND_max"  "T_sd"      "QV_max"    "BUSINORGS"
+# [8] "T_mean"    "Developed" "U_max"     "EMPSCIENC" "Density"   "V_max"     "PROPINSUR"
+# [15] "TQL_mean"  "ENVORGS"  
+# > vs$important_vars_global_se_names
+# [1] "PS_sd"     "SLP_mean"  "WIND_max"  "T_sd"      "BUSINORGS" "T_mean"   
+
+
 
 ### FEATURE MODEL
 X = df_bart %>%
