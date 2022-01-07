@@ -252,7 +252,7 @@ ii = interaction_investigator(bart, num_replicates_for_avg = 20, num_var_plot = 
 # [1] "SLP_mean"       "PS_sd"          "y1_predictions" "V_max"          "QV_max"        
 # [6] "T_sd"           "WIND_max"       "TQI_mean"       "U_max"      
 
-## Model Customer Outages (step 1)
+## Model Customer Outages 
 # > vs$important_vars_local_names
 # [1] "PS_sd"     "SLP_mean"  "TQI_mean"  "WIND_max"  "T_sd"      "QV_max"    "BUSINORGS"
 # [8] "T_mean"    "Developed" "U_max"     "EMPSCIENC" "Density"   "V_max"     "PROPINSUR"
@@ -260,10 +260,3 @@ ii = interaction_investigator(bart, num_replicates_for_avg = 20, num_var_plot = 
 # > vs$important_vars_global_se_names
 # [1] "PS_sd"     "SLP_mean"  "WIND_max"  "T_sd"      "BUSINORGS" "T_mean"   
 
-
-
-### FEATURE MODEL
-X = df_bart %>%
-  dplyr::select(-outage_number, -GEOID, -out_hrs, -out_percust) %>%
-  dplyr::select(vs$important_vars_local_names)
-model_name = paste("Large Events - BART Feature Select")
