@@ -16,7 +16,7 @@
 try_list = state_list[1:48]
 for (i in try_list){
   print(i)
-  temp_wd = paste("/Users/paulmj/Downloads/July2020_gSSURGO_by_State/gSSURGO_", i, sep = "")   # change working directory to file 
+  temp_wd = paste("./Data/July2020_gSSURGO_by_State/gSSURGO_", i, sep = "")   # change working directory to file 
   setwd(temp_wd) #set working directory 
   temp_gdb = paste("gSSURGO_", i, ".gdb", sep = "") # define geodatabase 
   temp_sf = sf::st_read(dsn = temp_gdb, layer = "MUPOLYGON") # read in MUPOLYGON layer 
@@ -61,9 +61,9 @@ mode = function(x) {
 # group extracted data 
 rz_extract_group = rz_extract %>%
   group_by(ID) %>%
-  summarize(RZ_mean = mean(AL_rootznemc100, na.rm = TRUE),
-            RZ_med = median(AL_rootznemc100, na.rm = TRUE),
-            RZ_mode = mode(AL_rootznemc100)
+  summarize(RZ_mean = mean(AL_rootznemc100, na.rm = TRUE), #AL_rootznemc100 is just the name of the variable for all states (bc it is the first raster layer)
+            RZ_med = median(AL_rootznemc100, na.rm = TRUE), #AL_rootznemc100 is just the name of the variable for all states (bc it is the first raster layer)
+            RZ_mode = mode(AL_rootznemc100) #AL_rootznemc100 is just the name of the variable for all states (bc it is the first raster layer)
             )
 
 # join data to counties (bind columns because no GEOID in raster but order is preserved when extracting)
