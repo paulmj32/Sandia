@@ -115,11 +115,13 @@ county_outages_GROUP_CLEAN = county_outages_GROUP %>%
 df_bart = data.frame(county_outages_GROUP_CLEAN) %>%
   drop_na %>% 
   dplyr::filter(out_hrs > 12) #filter to big events 
-# y = log(df_bart$out_hrs) #take log to help deal with extreme values 
+#y = log(df_bart$out_hrs) #take log to help deal with extreme values 
 y = log(df_bart$out_maxcust)
 X = df_bart %>%
   dplyr::select(-outage_number, -GEOID, -out_hrs, -out_maxcust, -out_percust)
+#model_name = paste("Predicting Duration - No Weather Data")
 model_name = paste("Predicting Max Outages - No Weather Data")
+
 
 bart = bartMachine(X, y) 
 predictions = predict(bart, X)
@@ -172,14 +174,20 @@ plot_filtering_estimates2 <- function(df) {
 plot_filtering_estimates2(gg)
 
 # Feature selection (Kapelner and Bleich, 2016)
-vs = var_selection_by_permute(bart, bottom_margin = 10, num_reps_for_avg = 20, num_permute_samples = 20, plot = F)
+vs = var_selection_by_permute(bart, bottom_margin = 10, num_reps_for_avg = 20, num_permute_samples = 20, plot = T)
 vs$important_vars_local_names
 vs$important_vars_global_se_names
+##Outages
 # > vs$important_vars_local_names
 # [1] "spi24_lag" "Density"   "Developed" "QMOHO"     "QFEMALE"   "QNATIVE"  
 # [7] "RZ_mean"  
 # > vs$important_vars_global_se_names
 # [1] "spi24_lag" "Density"   "Developed"
+##Duration - and pretty much same social indicators 
+# > vs$important_vars_local_names
+# [1] "spi03_lag"   "soil100_lag" "soil10_lag"  "spi24_lag"   "spi12_lag"  
+# > vs$important_vars_global_se_names
+# [1] "spi03_lag"   "soil100_lag" "soil10_lag" 
 
 #feature selection
 X = df_bart %>%
