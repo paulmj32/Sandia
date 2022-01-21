@@ -13,7 +13,7 @@ library(sf)
 setwd("~/Documents/01_VECTOR.nosync/Sandia")
 
 #### LOAD VARIABLES
-load("./Data/SandiaVariables.Rda") #from Sandia2_vars.R
+load("./Data/SandiaVariables.Rda") #from Sandia1_vars.R
 
 #### POWER DATA
 #outages_csv = read.csv("./Data/SE_states_outage_merra_2018.csv", header = T)
@@ -100,7 +100,7 @@ model_name = paste("Large Events - Static, Socio-economic, and Dynamic Variables
 # y1_predictions = predict(bart1, X1)
 load(file = "y1_predictions.Rda")
 X = df_bart %>%
-  dplyr::select(-outage_number, -GEOID, -out_hrs, -out_percust, -out_maxcust,) %>%
+  dplyr::select(-outage_number, -GEOID, -out_hrs, -out_percust, -out_maxcust) %>%
   bind_cols(data.frame(y1_predictions))
 model_name = paste("Large Events - Static, Socio-economic, and Dynamic Variables (with Frcst Outages)")
 
