@@ -9,10 +9,18 @@ library(sf)
 library(lme4)
 library(corrplot)
 library(viridis)
+library(doParallel)
 #library(sqldf)
 
 tidymodels_prefer()
 setwd("~/Documents/01_VECTOR.nosync/Sandia")
+num_cores = detectCores() - 1
+
+#function to un-register parallel processing in doParallel
+unregister_dopar = function() {
+  env <- foreach:::.foreachGlobals
+  rm(list=ls(name=env), pos=env)
+}
 
 #### LOAD VARIABLES ##############################################################################
 load("./Data/SandiaVariables.Rda") #from Sandia1_vars.R
@@ -107,10 +115,15 @@ rf_work = workflow() %>%
   add_recipe(hours_recipe) %>%
   add_model(rf_model)
 rf_grid = expand.grid(mtry = c(1, 3, 5), trees = c(100, 500, 1000), min_n = c(3, 5, 10))
+cl = makeCluster(num_cores, type = "FORK")
+registerDoParallel(cl, cores = num_cores)
 rf_tune = rf_work %>%
   tune_grid(resamples = df_cv,
             grid = rf_grid,
-            metrics = metric_set(yardstick::rmse, yardstick::rsq))
+            metrics = metric_set(yardstick::rmse, yardstick::rsq),
+            control = tune::control_grid(verbose = T, allow_par = T, parallel_over = "resamples")) #parallel processing turns off verbose
+stopCluster(cl) 
+unregister_dopar()
 show_best(rf_tune, metric = "rmse")
 rf_tune_results = rf_tune %>% collect_metrics()
 rf_best = rf_tune %>% select_best(metric = "rmse")
@@ -129,10 +142,15 @@ lre_work = workflow() %>%
   add_recipe(hours_recipe) %>%
   add_model(lre_model)
 lre_grid = grid_regular(parameters(penalty(), mixture()), levels = c(5, 5))
+cl = makeCluster(num_cores, type = "FORK")
+registerDoParallel(cl, cores = num_cores)
 lre_tune = lre_work %>%
   tune_grid(resamples = df_cv,
             grid = lre_grid,
-            metrics = metric_set(yardstick::rmse, yardstick::rsq))
+            metrics = metric_set(yardstick::rmse, yardstick::rsq),
+            control = tune::control_grid(verbose = T, allow_par = T, parallel_over = "resamples")) #parallel processing turns off verbose
+stopCluster(cl) 
+unregister_dopar()
 show_best(lre_tune, metric = "rmse")
 lre_tune_results = lre_tune %>% collect_metrics()
 lre_best = lre_tune %>% select_best(metric = "rmse")
@@ -152,11 +170,15 @@ gb_work = workflow() %>%
   add_recipe(hours_recipe) %>%
   add_model(gb_model)
 gb_grid = dials::grid_max_entropy(parameters(min_n(), tree_depth(), learn_rate(), loss_reduction()), size = 100)
+cl = makeCluster(num_cores, type = "FORK")
+registerDoParallel(cl, cores = num_cores)
 gb_tune = gb_work %>%
   tune_grid(resamples = df_cv,
             grid = gb_grid,
             metrics = metric_set(yardstick::rmse, yardstick::rsq),
-            control = tune::control_grid(verbose = T)) 
+            control = tune::control_grid(verbose = T, allow_par = T, parallel_over = "resamples")) #parallel processing turns off verbose
+stopCluster(cl) 
+unregister_dopar()
 show_best(gb_tune, metric = "rmse")
 gb_tune_results = gb_tune %>% collect_metrics()
 gb_best = gb_tune %>% select_best(metric = "rmse")
@@ -167,71 +189,153 @@ gb_test = gb_fit %>% collect_metrics() #metrics evaluated on test sample (b/c la
 gb_predictions = gb_fit %>% collect_predictions() #predictions for test sample (b/c last_fit() function)
 
 
+# ## Final model fit on all data 
+# rf_final = rf_work %>%
+#   finalize_workflow(rf_best) %>%
+#   fit(df_data)
+# rf_final_predictions = rf_final %>% predict(df_data)
 
 
-
-
-
-
-## Final model fit on all data 
-rf_final = rf_work %>%
-  finalize_workflow(rf_best) %>%
-  fit(df_data)
-rf_final_predictions = rf_final %>% predict(df_data)
-
-
-
-
-
-gg = dplyr::tibble(predictions = bart_pred,
-                   lower = bart_CI[,1],
-                   upper = bart_CI[,2],
-                   actual = y_test,
+##########################################################################################################
+###### PLOTTING ##########################################################################################
+##########################################################################################################
+gg = dplyr::tibble(actual = y_test,
+                   lasso = as.vector(lre_predictions$.pred),
                    rf = as.vector(rf_predictions$.pred),
-                   lre = as.vector(lre_predictions$.pred)
-                   
-)
+                   xgb = as.vector(gb_predictions$.pred),
+                   bart = bart_pred
+  )
 gg = arrange(gg, actual)
 gg$index = seq.int(nrow(gg))
-gg$Ymean = mean(gg$actual, na.rm = T)
+#gg$mean = mean(gg$actual, na.rm = T)
+gg_actual = gg %>% dplyr::select(index, actual)
+gg_pred = gg %>% dplyr::select(-actual) %>% pivot_longer(!index, names_to = "Model", values_to = "ypred")
+gg_all = gg %>% pivot_longer(!index, names_to = "Model", values_to = "ypred")
 
+#Test sample r-squared
+rsq_lre = paste(lre_test %>% dplyr::filter(.metric == "rsq") %>% pull(.estimate) %>% round(3) %>% format(nsmall = 3))
+rsq_rf = paste(rf_test %>% dplyr::filter(.metric == "rsq") %>% pull(.estimate) %>% round(3) %>% format(nsmall = 3))
+rsq_gbm = paste(gb_test %>% dplyr::filter(.metric == "rsq") %>% pull(.estimate) %>% round(3) %>% format(nsmall = 3))
+rsq_bart = paste(round(bart_rsq, 3) %>% format(nsmall = 3))
 
-lb1 = paste("R^2 == ", round(rsq, 3))
+#Cross-validation errors
+cverror_lre = paste(show_best(lre_tune, metric = "rmse") %>% dplyr::slice(1) %>% pull(mean) %>% round(3) %>% format(nsmall = 3))
+cverror_rf = paste(show_best(rf_tune, metric = "rmse") %>% dplyr::slice(1) %>% pull(mean) %>% round(3) %>% format(nsmall = 3))
+cverror_gbm = paste(show_best(gb_tune, metric = "rmse") %>% dplyr::slice(1) %>% pull(mean) %>% round(3) %>% format(nsmall = 3))
+cverror_bart = paste(data.frame(bart_fit$cv_stats) %>% dplyr::slice(1) %>% pull(oos_error) %>% round(3) %>% format(nsmall = 3))
 
-
+# ggplot 
 plot_filtering_estimates2 <- function(df) {
-  p <- ggplot(data = gg, aes(x = index)) +
-    theme_classic() +
-    geom_ribbon(aes(ymin = lower, ymax = upper, fill = "indianred"), alpha = 0.5) + #credible intervals 
-    geom_line(aes(y = predictions, colour = "red"), size = 0.25, alpha = .9) + #prediction point estimate
-    geom_point(aes(y = actual, colour = "black"), size = 0.55, shape = 16, alpha = 0.9) + #actual observation points
-    geom_line(aes(y = Ymean, colour = "blue"), size = 0.55, lty = "solid", alpha = 0.9) + #null model (mean only) 
-    geom_line(aes(y = rf, colour = "orange"), size = 0.55, lty = "solid", alpha = 0.9) + #null model (mean only) 
-    geom_line(aes(y = lre, colour = "green"), size = 0.55, lty = "solid", alpha = 0.9) + #null model (mean only) 
+  p = ggplot() + 
+    theme_classic() + 
+    geom_point(data = gg_actual, aes(x = index, y = actual, shape = "Actual"), color = "black", alpha = 1) +
+    scale_shape_manual(
+      name = element_blank(),
+      values = 16
+      ) +
+    geom_line(data = gg_pred, aes(x = index, y = ypred, color = Model, lty = Model), alpha = 0.95) +
+    #scale_color_viridis(discrete = T, option = "D", direction = 1) + 
+    scale_color_manual(values = c("#FC4E07", "#1E88E5", "forestgreen", "#E7B800"), 
+                       labels = c(bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
+                                  bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
+                                  bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
+                                  bquote("XGB (" * R^2 ~ "=" ~ .(rsq_gbm) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_gbm) * ")")
+                                  ),
+                       name = element_blank()) +
+    scale_linetype_manual(values = c(1, 2, 3, 6),
+                          labels = c(bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
+                                     bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
+                                     bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
+                                     bquote("XGB (" * R^2 ~ "=" ~ .(rsq_gbm) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_gbm) * ")")
+                          ),
+                          name = element_blank()) + 
+    #scale_color_locuszoom() + 
     ylab("Outage Duration (log hours)") + 
     #ylab("Max Cust. Outages (log)") + 
     scale_y_continuous(labels = function(x) paste0(x)) +
     xlab("Outage Index (event x county)") +
-    ggtitle(model_name) +
-    scale_fill_identity(name = "fill", guide = 'legend', labels = c('95% CI')) + 
-    scale_colour_manual(name = 'colour',
-                        values = c("green", "orange", 'black',"blue", "red"),
-                        #labels = c("RF",'Actual', 'Mean', 'BART'),
-                        guide = guide_legend(
-                          reverse = T,
-                          override.aes = list(
-                            linetype = c("solid", "solid", "solid", "solid","solid"),
-                            shape = c(NA, NA, NA, NA, 16))
-                        )) +
-    theme(plot.title = element_text(hjust = 0.5),
-          legend.title = element_blank(),
+    ggtitle("County-Level Predictions: Test Sample") + 
+    guides(
+      color = guide_legend(order = 2),
+      shape = guide_legend(order = 1),
+      linetype = guide_legend(order = 2)
+      ) + 
+    theme(legend.spacing.y = unit(-0.25, "cm"),
           legend.direction = "vertical",
-          legend.box = "horizontal",
-          legend.position = c(.25, .75) #x and y percentage
-    ) 
-    #annotate("text", x = quantile(gg$index, 0.8), y = quantile(gg$actual, .05), label=lb1, parse=T, color="red", size = 3) 
+          legend.box = "vertical",
+          legend.position = c(.215, .8),
+          plot.title = element_text(hjust = 0.5)
+          )
+          
   print(p)
 }
 plot_filtering_estimates2(gg)
+
+
+# ggplot (for all)
+plot_filtering_estimates2 <- function(df) {
+  p = ggplot() + 
+    theme_classic() + 
+    geom_point(data = gg_all, aes(x = index, y = ypred, color = Model, shape = Model), alpha = 1) +
+    scale_shape_manual(
+      name = element_blank(),
+      values = c(16, 2, 3, 4, 5),
+      labels = c("Actual",
+                 bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
+                 bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
+                 bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
+                 bquote("XGB (" * R^2 ~ "=" ~ .(rsq_gbm) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_gbm) * ")")
+      )
+    ) +
+    scale_color_manual(
+      values = c("black", "#FC4E07", "#1E88E5", "forestgreen", "#E7B800"), 
+      labels = c("Actual",
+                 bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
+                 bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
+                 bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
+                 bquote("XGB (" * R^2 ~ "=" ~ .(rsq_gbm) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_gbm) * ")")
+      ),
+      name = element_blank()) +
+    geom_line(data = gg_all, aes(x = index, y = ypred, color = Model, lty = Model), alpha = 0.8) +
+    #scale_color_viridis(discrete = T, option = "D", direction = 1) + 
+    # scale_color_manual(values = c("#FC4E07", "#1E88E5", "forestgreen", "#E7B800"), 
+    #                    labels = c(bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
+    #                               bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
+    #                               bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
+    #                               bquote("XGB (" * R^2 ~ "=" ~ .(rsq_gbm) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_gbm) * ")")
+    #                    ),
+    #                    name = element_blank()) +
+    scale_linetype_manual(
+      values = c(1, 1, 1, 1, 1),
+      labels = c("Actual",
+                 bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
+                 bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
+                 bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
+                 bquote("XGB (" * R^2 ~ "=" ~ .(rsq_gbm) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_gbm) * ")")         
+                 ),
+      name = element_blank()) + 
+    #scale_color_locuszoom() + 
+    ylab("Outage Duration (log hours)") + 
+    #ylab("Max Cust. Outages (log)") + 
+    scale_y_continuous(labels = function(x) paste0(x)) +
+    xlab("Outage Index (event x county)") +
+    ggtitle("County-Level Predictions: Test Sample") + 
+    # guides(
+    #   color = guide_legend(order = 2),
+    #   shape = guide_legend(order = 1),
+    #   linetype = guide_legend(order = 2)
+    # ) + 
+    theme(legend.spacing.y = unit(-0.25, "cm"),
+          legend.direction = "vertical",
+          legend.box = "vertical",
+          legend.position = c(.215, .8),
+          plot.title = element_text(hjust = 0.5)
+    )
+  
+  print(p)
+}
+plot_filtering_estimates2(gg)
+
+
 
 
