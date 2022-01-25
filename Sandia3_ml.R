@@ -61,7 +61,9 @@ county_outages_GROUP = outages_group %>%
   left_join(county_map_static_CLEAN, by = c("GEOID")) %>% #join static environmental variables
   left_join(county_scores_CLEAN, by = c("GEOID")) #join socio-economic variables 
 
+################################################################################################
 #### MACHINE LEARNING ##########################################################################
+################################################################################################
 df_data = data.frame(county_outages_GROUP) %>%
   dplyr::filter(out_hrs > quantile(county_outages_GROUP$out_hrs, .9)) %>% #filter to big events 
   dplyr::select(-outage_number, -GEOID, -out_percust) %>% #get rid of variables not used 
@@ -77,7 +79,7 @@ df_train = training(df_split)
 df_test = testing(df_split)  
 df_cv = vfold_cv(df_train, v = 10, repeats = 1)
 
-## Recipe for models
+## Pre-processing (recipe)
 hours_recipe = recipe(ln_hrs ~ . , data = df_data) %>%
   step_rm(ln_cust) %>% 
   step_impute_knn(all_predictors()) %>% #knn impute missing predictors (if any)
@@ -85,12 +87,9 @@ hours_recipe = recipe(ln_hrs ~ . , data = df_data) %>%
   step_zv(all_predictors()) %>% #removes predictors of single value 
   step_corr(all_predictors())  #removes highly correlated 
 prep(hours_recipe) #shows changes 
-#hours_juice = prep(hours_recipe) %>% juice() #view prepared dataset 
+hours_juice = prep(hours_recipe) %>% juice() #view prepared dataset 
 
-## Specify models
-model_name = paste("Large Events - Static, Socio-economic, and Dynamic Variables")
-
-# BART (not part of tidymodels yet) 
+## BART (not part of tidymodels yet) 
 df_bart = prep(hours_recipe) %>% juice()
 df_bart_train = df_bart %>% slice(df_split$in_id) %>% dplyr::select(-ln_hrs)
 X = data.frame(df_bart_train)
@@ -105,7 +104,7 @@ bart_rmse = sqrt(mean((bart_pred - y_test)^2))
 bart_rsq = 1 - sum((y_test - bart_pred)^2) / sum((y_test - mean(y_test))^2) 
 bart_CI = round(calc_credible_intervals(bart_fit, X_test, ci_conf = 0.95), 2)
 
-# Random Forest
+## Random Forest
 #https://www.rebeccabarter.com/blog/2020-03-25_machine_learning/
 show_model_info("rand_forest")
 rf_model = rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>%
@@ -133,7 +132,7 @@ rf_fit = rf_work %>%
 rf_test = rf_fit %>% collect_metrics() #metrics evaluated on test sample (b/c last_fit() function) 
 rf_predictions = rf_fit %>% collect_predictions() #predictions for test sample (b/c last_fit() function)
 
-# Lasso/Ridge/ElasticNet 
+## Lasso/Ridge/ElasticNet 
 #https://dnield.com/posts/tidymodels-intro/ 
 show_model_info("linear_reg")
 lre_model = linear_reg(penalty = tune(), mixture = tune()) %>%
@@ -160,7 +159,7 @@ lre_fit = lre_work %>%
 lre_test = lre_fit %>% collect_metrics() #metrics evaluated on test sample (b/c last_fit() function) 
 lre_predictions = lre_fit %>% collect_predictions() #predictions for test sample (b/c last_fit() function)
 
-# GBM 
+## GBM 
 #https://www.r-bloggers.com/2020/05/using-xgboost-with-tidymodels/
 show_model_info("boost_tree")
 gb_model = boost_tree(mode = "regression", trees = 1000, 
@@ -187,13 +186,6 @@ gb_fit = gb_work %>%
   last_fit(df_split)
 gb_test = gb_fit %>% collect_metrics() #metrics evaluated on test sample (b/c last_fit() function) 
 gb_predictions = gb_fit %>% collect_predictions() #predictions for test sample (b/c last_fit() function)
-
-
-# ## Final model fit on all data 
-# rf_final = rf_work %>%
-#   finalize_workflow(rf_best) %>%
-#   fit(df_data)
-# rf_final_predictions = rf_final %>% predict(df_data)
 
 
 ##########################################################################################################
@@ -223,54 +215,6 @@ cverror_lre = paste(show_best(lre_tune, metric = "rmse") %>% dplyr::slice(1) %>%
 cverror_rf = paste(show_best(rf_tune, metric = "rmse") %>% dplyr::slice(1) %>% pull(mean) %>% round(3) %>% format(nsmall = 3))
 cverror_gbm = paste(show_best(gb_tune, metric = "rmse") %>% dplyr::slice(1) %>% pull(mean) %>% round(3) %>% format(nsmall = 3))
 cverror_bart = paste(data.frame(bart_fit$cv_stats) %>% dplyr::slice(1) %>% pull(oos_error) %>% round(3) %>% format(nsmall = 3))
-
-# ggplot 
-plot_filtering_estimates2 <- function(df) {
-  p = ggplot() + 
-    theme_classic() + 
-    geom_point(data = gg_actual, aes(x = index, y = actual, shape = "Actual"), color = "black", alpha = 1) +
-    scale_shape_manual(
-      name = element_blank(),
-      values = 16
-      ) +
-    geom_line(data = gg_pred, aes(x = index, y = ypred, color = Model, lty = Model), alpha = 0.95) +
-    #scale_color_viridis(discrete = T, option = "D", direction = 1) + 
-    scale_color_manual(values = c("#FC4E07", "#1E88E5", "forestgreen", "#E7B800"), 
-                       labels = c(bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
-                                  bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
-                                  bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
-                                  bquote("XGB (" * R^2 ~ "=" ~ .(rsq_gbm) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_gbm) * ")")
-                                  ),
-                       name = element_blank()) +
-    scale_linetype_manual(values = c(1, 2, 3, 6),
-                          labels = c(bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
-                                     bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
-                                     bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
-                                     bquote("XGB (" * R^2 ~ "=" ~ .(rsq_gbm) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_gbm) * ")")
-                          ),
-                          name = element_blank()) + 
-    #scale_color_locuszoom() + 
-    ylab("Outage Duration (log hours)") + 
-    #ylab("Max Cust. Outages (log)") + 
-    scale_y_continuous(labels = function(x) paste0(x)) +
-    xlab("Outage Index (event x county)") +
-    ggtitle("County-Level Predictions: Test Sample") + 
-    guides(
-      color = guide_legend(order = 2),
-      shape = guide_legend(order = 1),
-      linetype = guide_legend(order = 2)
-      ) + 
-    theme(legend.spacing.y = unit(-0.25, "cm"),
-          legend.direction = "vertical",
-          legend.box = "vertical",
-          legend.position = c(.215, .8),
-          plot.title = element_text(hjust = 0.5)
-          )
-          
-  print(p)
-}
-plot_filtering_estimates2(gg)
-
 
 # ggplot (for all)
 plot_filtering_estimates2 <- function(df) {
@@ -337,5 +281,46 @@ plot_filtering_estimates2 <- function(df) {
 plot_filtering_estimates2(gg)
 
 
+########################################################################################################
+##### VARIABLE IMPORTANCE - FINAL MODEL ################################################################
+########################################################################################################
+#https://www.rebeccabarter.com/blog/2020-03-25_machine_learning/#variable-importance
+#https://xgboost.readthedocs.io/en/stable/R-package/discoverYourData.html
+#https://bgreenwell.github.io/pdp/articles/pdp-example-xgboost.html
+#https://bgreenwell.github.io/pdp/articles/pdp-extending.html
+#https://christophm.github.io/interpretable-ml-book/ice.html
+library(xgboost)
+library(vip)
+library(pdp)
+final_model = gb_work %>%
+  finalize_workflow(gb_best) %>%
+  fit(df_data)
+final_obj = extract_fit_parsnip(final_model)$fit
+importance = xgb.importance(model = final_obj)
+head(importance, n = 15); vip(final_obj, n = 20)
+#xgb.plot.importance(importance_matrix = importance)
+x = hours_juice %>% dplyr::select(-ln_hrs)
+p_ps = pdp::partial(final_obj, pred.var = "PS_sd", ice = T, center = F,
+                     plot = T, rug= T, alpha = 0.1, #plot.engine = "ggplot2",
+                     train = x, type = "regression")
+p_slp = pdp::partial(final_obj, pred.var = "SLP_mean", ice = T, center = F,
+                     plot = T, rug= T, alpha = 0.1, #plot.engine = "ggplot2",
+                     train = x, type = "regression")
+p_v = pdp::partial(final_obj, pred.var = "V_max", ice = T, center = F,
+                     plot = T, rug= T, alpha = 0.1, #plot.engine = "ggplot2",
+                     train = x, type = "regression")
+p_tqv = pdp::partial(final_obj, pred.var = "TQV_mean", ice = T, center = F,
+                   plot = T, rug= T, alpha = 0.1, #plot.engine = "ggplot2",
+                   train = x, type = "regression")
+grid.arrange(p_ps, p_slp, p_v, p_tqv, ncol = 2)
 
-
+p1 = pdp::partial(final_obj, pred.var = c("PS_sd", "SLP_mean"), 
+                  plot = T, chull= T, rug = T, plot.engine = "ggplot2",
+                  train = x, type = "regression")
+p2 = pdp::partial(final_obj, pred.var = c("PS_sd", "V_max"), 
+                  plot = T, chull= T, plot.engine = "ggplot2",
+                  train = x, type = "regression")
+p3 = pdp::partial(final_obj, pred.var = c("SLP_mean", "V_max"), 
+                  plot = T, chull= T, plot.engine = "ggplot2",
+                  train = x, type = "regression")
+  
