@@ -253,10 +253,32 @@ census_map_soil_day = census_map_soil %>%
 #save(census_map_soil_day, file = "./Data/census_map_soil_day.Rda")
 #load(file = "./Data/census_map_soil_day.Rda")
 
+## WIND SPEED - forecasts from StormGeo
+hurricane.frcst.files = list.files(path = "./Data/StormGEO/HarveyNC", full.names = T, pattern = "\\.nc$") #get forecast (NCDF4 format) 
+hurricane.frcst.raster = lapply(hurricane.frcst.files, function(i){raster::raster(i, varname = "wspd")}) #read list of files as rasters
+hurricane.frcst.proj = lapply(hurricane.frcst.raster, function(i){raster::projectRaster(i, crs = crs(census_map_area))}) #project into crs  
+hurricane.frcst.terra = lapply(hurricane.frcst.proj)
 
-gg2 = ggplot(temp_map_soil)+
-  geom_sf(aes(fill = soil40_100), color = NA) + 
-  scale_fill_viridis_c(option="plasma", na.value = "grey50") +
+  
+   
+
+asd = raster::raster(hurricane.frcst.files[90], varname = "wspd")
+asd2 = raster::projectRaster(asd, crs = crs(census_map_area))
+asd3 = terra::rast(asd2) #convert to Spat Raster for easier masking and extraction
+asd4 = terra::crop(asd3, vect(census_map_area)) #crop to map
+asd5 = terra::mask(asd4, vect(census_map_area)) #mask to map (make anything outside NA)
+asd6 = terra::extract(x = asd5, y = vect(census_map_area)) # extract values
+asd_group = asd6 %>% # group extracted data 
+  group_by(ID) %>%
+  summarize(WIND_mean = mean(X10.meter.Windspeed, na.rm = TRUE))
+census_map_wind = census_map_area %>% #join rz values
+  bind_cols(asd_group)
+
+
+gg2 = ggplot(census_map_wind)+
+  geom_sf(aes(fill = WIND_mean), color = NA) + 
+  #scale_fill_viridis_c(option="plasma", na.value = "grey50") +
+  scale_fill_viridis_c(option="plasma", na.value = "grey10") +
   #geom_sf(fill = NA, show.legend = F, color = "black", lwd = 0.005)+
   #coord_sf(datum = NA) + #removes gridlines 
   #guides(fill = "none") + #removes legend
@@ -268,4 +290,53 @@ gg2 = ggplot(temp_map_soil)+
         axis.title.y = element_blank()
   )
 gg2
+
+
+
+
+
+############ COUNTY PLOTTING 
+
+county_map = get_acs(geography = "county", state = state,
+                     variables=c("B01003_001"), year = year, geometry = TRUE, 
+                     cache_table = TRUE)
+county_map = county_map %>%
+  mutate(POPULATION = estimate) %>%
+  dplyr::select(GEOID, NAME, POPULATION) %>% 
+  st_transform(mycrs) # project to Conic Equal Area Albers, EPSG:5070 
+
+county_map_area = county_map %>%  
+  mutate(AREA = as.vector(st_area(county_map))) %>% #sq-meters; as.vector removes units suffix 
+  mutate(DENSITY = POPULATION / AREA * 1000^2) #population per sq-km 
+
+i = 60
+csd = raster::raster(hurricane.frcst.files[i], varname = "wspd")
+csd2 = raster::projectRaster(csd, crs = crs(county_map_area))
+csd3 = terra::rast(csd2) #convert to Spat Raster for easier masking and extraction
+csd4 = terra::crop(csd3, vect(county_map_area)) #crop to map
+csd5 = terra::mask(csd4, vect(county_map_area)) #mask to map (make anything outside NA)
+csd6 = terra::extract(x = csd5, y = vect(county_map_area)) # extract values
+csd_group = csd6 %>% # group extracted data 
+  group_by(ID) %>%
+  summarize(WIND_mean = mean(X10.meter.Windspeed, na.rm = TRUE))
+county_map_wind = county_map_area %>% #join rz values
+  bind_cols(csd_group)
+
+county_map_Harris = county_map_area %>%
+  dplyr::filter(GEOID == "48201")
+rast_df = as.data.frame(csd3, xy= TRUE)
+title = substr(hurricane.frcst.files[i], 26, 100)
+
+gg3 = ggplot() +
+  geom_tile(data = rast_df, aes(x = x, y = y, fill = X10.meter.Windspeed), alpha = 0.9) +
+  geom_sf(data = county_map_area, color = "black", fill = "NA", lwd = 0.4) +
+  geom_sf(data = county_map_Harris, color = "black", fill = "Skyblue", lwd = 0.4) +
+  scale_fill_viridis_c(option="plasma", na.value = "grey10") +
+  theme_dark() +
+  ggtitle(paste(title)) + 
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()
+  )
+gg3
 

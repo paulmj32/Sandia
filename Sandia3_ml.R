@@ -61,9 +61,9 @@ county_outages_GROUP = outages_group %>%
   left_join(county_map_static_CLEAN, by = c("GEOID")) %>% #join static environmental variables
   left_join(county_scores_CLEAN, by = c("GEOID")) #join socio-economic variables 
 
-################################################################################################
-#### MACHINE LEARNING ##########################################################################
-################################################################################################
+##########################################################################################################
+#### MACHINE LEARNING ####################################################################################
+##########################################################################################################
 df_data = data.frame(county_outages_GROUP) %>%
   dplyr::filter(out_hrs > quantile(county_outages_GROUP$out_hrs, .9)) %>% #filter to big events 
   dplyr::select(-outage_number, -GEOID, -out_percust) %>% #get rid of variables not used 
@@ -281,9 +281,9 @@ plot_filtering_estimates2 <- function(df) {
 plot_filtering_estimates2(gg)
 
 
-########################################################################################################
-##### VARIABLE IMPORTANCE - FINAL MODEL ################################################################
-########################################################################################################
+##########################################################################################################
+##### VARIABLE IMPORTANCE - FINAL MODEL ##################################################################
+##########################################################################################################
 #https://www.rebeccabarter.com/blog/2020-03-25_machine_learning/#variable-importance
 #https://xgboost.readthedocs.io/en/stable/R-package/discoverYourData.html
 #https://bgreenwell.github.io/pdp/articles/pdp-example-xgboost.html
