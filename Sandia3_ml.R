@@ -109,7 +109,8 @@ bart_CI = round(calc_credible_intervals(bart_fit, X_test, ci_conf = 0.95), 2)
 show_model_info("rand_forest")
 rf_model = rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>%
   set_engine("ranger", importance = "permutation") %>%
-  set_mode("regression") 
+  set_mode("regression") %>%
+  translate()
 rf_work = workflow() %>%
   add_recipe(hours_recipe) %>%
   add_model(rf_model)
@@ -136,7 +137,8 @@ rf_predictions = rf_fit %>% collect_predictions() #predictions for test sample (
 #https://dnield.com/posts/tidymodels-intro/ 
 show_model_info("linear_reg")
 lre_model = linear_reg(penalty = tune(), mixture = tune()) %>%
-  set_engine("glmnet") 
+  set_engine("glmnet") %>%
+  translate()
 lre_work = workflow() %>% 
   add_recipe(hours_recipe) %>%
   add_model(lre_model)
@@ -161,10 +163,12 @@ lre_predictions = lre_fit %>% collect_predictions() #predictions for test sample
 
 ## GBM 
 #https://www.r-bloggers.com/2020/05/using-xgboost-with-tidymodels/
+# https://datascience.stackexchange.com/questions/15305/how-does-xgboost-learn-what-are-the-inputs-for-missing-values
 show_model_info("boost_tree")
 gb_model = boost_tree(mode = "regression", trees = 1000, 
                       min_n = tune(), tree_depth = tune(), learn_rate = tune(), loss_reduction = tune()) %>%
-  set_engine(engine = "xgboost")
+  set_engine(engine = "xgboost") %>%
+  translate()
 gb_work = workflow() %>%
   add_recipe(hours_recipe) %>%
   add_model(gb_model)
@@ -216,23 +220,28 @@ cverror_rf = paste(show_best(rf_tune, metric = "rmse") %>% dplyr::slice(1) %>% p
 cverror_gbm = paste(show_best(gb_tune, metric = "rmse") %>% dplyr::slice(1) %>% pull(mean) %>% round(3) %>% format(nsmall = 3))
 cverror_bart = paste(data.frame(bart_fit$cv_stats) %>% dplyr::slice(1) %>% pull(oos_error) %>% round(3) %>% format(nsmall = 3))
 
+#color_vec = c("black", "#bef7ff", "#86b7ff", "#4d76ff", "#1536ff")
+#color_vec = c("black", "#FC4E07", "#1E88E5", "forestgreen", "#E7B800")
+color_vec = c("black", "#440154FF", "#31688EFF", "#35B779FF", "#FDE725FF")
+
 # ggplot (for all)
 plot_filtering_estimates2 <- function(df) {
   p = ggplot() + 
     theme_classic() + 
-    geom_point(data = gg_all, aes(x = index, y = ypred, color = Model, shape = Model), alpha = 1) +
-    scale_shape_manual(
-      name = element_blank(),
-      values = c(16, 2, 3, 4, 5),
-      labels = c("Actual",
-                 bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
-                 bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
-                 bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
-                 bquote("XGB (" * R^2 ~ "=" ~ .(rsq_gbm) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_gbm) * ")")
-      )
-    ) +
+    geom_hline(yintercept = mean(gg$actual, na.rm = T), linetype="dashed", color = "gray50") +
+    # geom_point(data = gg_all, aes(x = index, y = ypred, color = Model, shape = Model), alpha = 1) +
+    # scale_shape_manual(
+    #   name = element_blank(),
+    #   values = c(16, 2, 3, 4, 5),
+    #   labels = c("Actual",
+    #              bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
+    #              bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
+    #              bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
+    #              bquote("XGB (" * R^2 ~ "=" ~ .(rsq_gbm) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_gbm) * ")")
+    #   )
+    # ) +
     scale_color_manual(
-      values = c("black", "#FC4E07", "#1E88E5", "forestgreen", "#E7B800"), 
+      values = color_vec, 
       labels = c("Actual",
                  bquote("BART (" * R^2 ~ "=" ~ .(rsq_bart) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_bart) * ")"), 
                  bquote("Lasso (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
@@ -289,6 +298,7 @@ plot_filtering_estimates2(gg)
 #https://bgreenwell.github.io/pdp/articles/pdp-example-xgboost.html
 #https://bgreenwell.github.io/pdp/articles/pdp-extending.html
 #https://christophm.github.io/interpretable-ml-book/ice.html
+# https://datascience.stackexchange.com/questions/15305/how-does-xgboost-learn-what-are-the-inputs-for-missing-values
 library(xgboost)
 library(vip)
 library(pdp)
@@ -314,6 +324,13 @@ p_tqv = pdp::partial(final_obj, pred.var = "TQV_mean", ice = T, center = F,
                    train = x, type = "regression")
 grid.arrange(p_ps, p_slp, p_v, p_tqv, ncol = 2)
 
+p_wind =  pdp::partial(final_obj, pred.var = "WIND_max", ice = T, center = F,
+                       plot = T, rug= T, alpha = 0.1, plot.engine = "ggplot2",
+                       train = x, type = "regression") +
+  geom_vline(xintercept = 8.9, color = "blue") + 
+  ggtitle("PDP and ICE - Max Wind Speed (m/s)") + 
+  annotate("text", x =12.5, y = 6, label="Tropical Storm Wind Forecast", color="blue", size = 3) 
+
 p1 = pdp::partial(final_obj, pred.var = c("PS_sd", "SLP_mean"), 
                   plot = T, chull= T, rug = T, plot.engine = "ggplot2",
                   train = x, type = "regression")
@@ -323,4 +340,7 @@ p2 = pdp::partial(final_obj, pred.var = c("PS_sd", "V_max"),
 p3 = pdp::partial(final_obj, pred.var = c("SLP_mean", "V_max"), 
                   plot = T, chull= T, plot.engine = "ggplot2",
                   train = x, type = "regression")
+
+### View tree diagram 
+xgb.plot.tree(model = final_obj, trees = 1:3) 
   

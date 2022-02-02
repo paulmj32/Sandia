@@ -257,15 +257,48 @@ census_map_soil_day = census_map_soil %>%
 hurricane.frcst.files = list.files(path = "./Data/StormGEO/HarveyNC", full.names = T, pattern = "\\.nc$") #get forecast (NCDF4 format) 
 hurricane.frcst.raster = lapply(hurricane.frcst.files, function(i){raster::raster(i, varname = "wspd")}) #read list of files as rasters
 hurricane.frcst.proj = lapply(hurricane.frcst.raster, function(i){raster::projectRaster(i, crs = crs(census_map_area))}) #project into crs  
-hurricane.frcst.terra = lapply(hurricane.frcst.proj)
+hurricane.frcst.terra = lapply(hurricane.frcst.proj, function(i){terra::rast(i)}) #convert to Spat Raster for easier masking and extraction
+hurricane.frcst.crop = lapply(hurricane.frcst.terra, 
+                              function(i){
+                                if("try-error" %in% class(try(terra::crop(i, vect(census_map_area)), silent = T))){NULL}
+                                else {terra::crop(i, vect(census_map_area))}
+                                }
+                              ) #crop to map and assign NULL for when the extents do not overlap 
+hurricane.frcst.mask = lapply(hurricane.frcst.crop, 
+                              function(i){
+                                if("try-error" %in% class(try(terra::mask(i, vect(census_map_area)), silent = T))){NULL}
+                                else {terra::mask(i, vect(census_map_area))}
+                                }
+                              ) #mask map and assign NULL for when the extents do not overlap 
+hurricane.frcst.extract = lapply(hurricane.frcst.mask, 
+                              function(i){
+                                if("try-error" %in% class(try(terra::extract(i, vect(census_map_area)), silent = T))){NULL}
+                                else {terra::extract(i, vect(census_map_area))}
+                                }
+                              ) #extract values to census tracts
+hurricane.frcst.group = lapply(hurricane.frcst.extract, 
+                                function(i){
+                                  if(is.null(i)){rep(NA, nrow(census_map))} #want same rows as number of tracts even if null to make unlisting easier
+                                  else {i %>% group_by(ID) %>% summarize(WIND_mean = mean(X10.meter.Windspeed, na.rm = TRUE))}
+                                }
+                              ) #group extracted values by census tract
+hurricane.frcst.df = as.data.frame(hurricane.frcst.group) %>% dplyr::select(ID, contains("WIND_mean")) #put list into data.frame
+hurricane.frcst.maps = census_map_area %>% bind_cols(hurricane.frcst.df) #map of forceasted wind speeds
+max_wind_names = hurricane.frcst.df %>% dplyr::select(contains("WIND_mean")) %>% names()
+census_map_WINDmax = hurricane.frcst.maps %>%
+  mutate(WIND_max = pmax(!!!rlang::syms(max_wind_names), na.rm = T)) %>% # https://stackoverflow.com/questions/32978458/dplyr-mutate-rowwise-max-of-range-of-columns
+  dplyr::select(GEOID, WIND_max)
+#save(census_map_WINDmax, file = "./Data/census_map_WINDmax.Rda")
+#load(file = "./Data/census_map_soil_day.Rda")  
+
+
 
   
-   
-
-asd = raster::raster(hurricane.frcst.files[90], varname = "wspd")
+i = 1
+asd = raster::raster(hurricane.frcst.files[i], varname = "wspd")
 asd2 = raster::projectRaster(asd, crs = crs(census_map_area))
-asd3 = terra::rast(asd2) #convert to Spat Raster for easier masking and extraction
-asd4 = terra::crop(asd3, vect(census_map_area)) #crop to map
+asd3 = terra::rast(asd2) 
+asd4 = terra::crop(asd3, vect(census_map_area))
 asd5 = terra::mask(asd4, vect(census_map_area)) #mask to map (make anything outside NA)
 asd6 = terra::extract(x = asd5, y = vect(census_map_area)) # extract values
 asd_group = asd6 %>% # group extracted data 
@@ -275,10 +308,10 @@ census_map_wind = census_map_area %>% #join rz values
   bind_cols(asd_group)
 
 
-gg2 = ggplot(census_map_wind)+
-  geom_sf(aes(fill = WIND_mean), color = NA) + 
+gg2 = ggplot(hurricane.frcst.max)+
+  geom_sf(aes(fill = WIND_max), color = NA) + 
   #scale_fill_viridis_c(option="plasma", na.value = "grey50") +
-  scale_fill_viridis_c(option="plasma", na.value = "grey10") +
+  scale_fill_viridis_c(option="plasma", na.value = "skyblue") +
   #geom_sf(fill = NA, show.legend = F, color = "black", lwd = 0.005)+
   #coord_sf(datum = NA) + #removes gridlines 
   #guides(fill = "none") + #removes legend
@@ -291,6 +324,20 @@ gg2 = ggplot(census_map_wind)+
   )
 gg2
 
+
+rast_df = as.data.frame(asd4, xy= TRUE)
+title = substr(hurricane.frcst.files[i], 26, 100)
+gg3 = ggplot() +
+  geom_tile(data = rast_df, aes(x = x, y = y, fill = X10.meter.Windspeed), alpha = 0.9) +
+  geom_sf(data = census_map_area, color = "black", fill = "Skyblue", lwd = 0.4) +
+  scale_fill_viridis_c(option="plasma", na.value = "grey10") +
+  theme_dark() +
+  ggtitle(paste(title)) + 
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()
+  )
+gg3
 
 
 
