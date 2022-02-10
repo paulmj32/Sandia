@@ -133,16 +133,44 @@ census_map_rz = census_map_area %>% #join rz values
 #load(file = "./Data/census_map_rz.Rda")
 
 ## SOCIO-ECONOMIC (from feature selection) 
-tx_vars_use = c("B01003_001", "B01001_026", "B01001C_001", "B25024_010" , "B25001_001")
+tx_vars_use = c("B01003_001", #total population
+                "B01001_026", #female population
+                "B01001C_001", #native american population
+                "B25024_010", "B25001_001", #mobile homes and total housing units 
+                "B25077_001", #median housing value (Factor 1)
+                "B01001D_001", #asian population (part of Factor 1)
+                "B17001_002", #poverty population (Factor 2) 
+                "B01001B_001", #black population (part of Factor 2)
+                "B19055_002", "B19055_001", #households receiving social security and total households (Factor 4) 
+                "B01001I_001", #hispanic/latino population (Factor 5)
+                "B06009_004", "B06009_005", "B06009_006", "B06009_002", #education equity: -abs((B06009_004 + B06009_005 + B06009_006) - B06009_002)
+                "B25034_007", "B25034_008", "B25034_009", "B25034_001", #housing stock construction quality: (B25034_007 + B25034_008 + B25034_009) / B25034_001
+                "B05007_002", #%population not foreign-born persons who came to US within previous five years: (B01003_001 - B05007_002) / B01003_001
+                "B06001_013", #%population born in state of residence B06001_013 / B01003_001
+                "B06009_002", #%population less than 12-th grade degree B06009_002 / B01003_001
+                "B23025_004" #%population in labor force: B23025_004 / B01003_001 
+                )
 tx_acs_data = get_acs(geography = "tract", state = state, county = county, variables=tx_vars_use, year = year, geometry = FALSE)
 tx_acs_data_w = tx_acs_data %>%
   dplyr::select(-moe, -NAME) %>% #remove errors of estimates because we're spreading by variable and don't want duplicates, and don't need name b/c joining by GEOID
   spread(key=variable, value = estimate)
 tx_sec_dat = tx_acs_data_w %>%
-  mutate(QFEMALE = B01001_026 / B01003_001) %>% #SoVI - female population 
-  mutate(QNATIVE = B01001C_001 / B01003_001) %>% #SoVI - native american population 
-  mutate(QMOHO = B25024_010 / B25001_001) %>% # SoVI and SVI - percent mobile homes 
-  dplyr::select(c(GEOID, QFEMALE:QMOHO))
+  mutate(QFEMALE = B01001_026 / B01003_001) %>% # %female
+  mutate(QNATIVE = B01001C_001 / B01003_001) %>% # %native american 
+  mutate(QMOHO = B25024_010 / B25001_001) %>% # %mobile homes
+  mutate(MDHVAL = B25077_001) %>% # median housing value 
+  mutate(QASIAN = B01001D_001 / B01003_001) %>% # %asian 
+  mutate(QPOVERTY = B17001_002 / B01003_001) %>% # %below poverty line
+  mutate(QBLACK = B01001B_001 / B01003_001) %>% # %black 
+  mutate(QSSBEN =  B19055_002 / B19055_001) %>% #%households receiving social security 
+  mutate(QSPANISH = B01001I_001 / B01003_001) %>% # %hispanic or latino 
+  mutate(EDEQUITY = -abs((B06009_004 + B06009_005 + B06009_006) - B06009_002)) %>% #education equity 
+  mutate(HOUSEQUAL = (B25034_007 + B25034_008 + B25034_009) / B25034_001) %>% #housing quality 
+  mutate(PATTACHIM = (B01003_001 - B05007_002) / B01003_001) %>% #long-time immigrants
+  mutate(PATTACHRES = B06001_013 / B01003_001) %>% #native state residents 
+  mutate(QED12 =  B06009_002 / B01003_001) %>% #percent less than 12th grade education  
+  mutate(QEMPL = B23025_004 / B01003_001) %>% #percent employed
+  dplyr::select(c(GEOID, QFEMALE:QEMPL))
 census_map_social = census_map_area %>%
   inner_join(tx_sec_dat, by = "GEOID")
 #save(census_map_social, file = "./Data/census_map_social.Rda")
@@ -196,62 +224,62 @@ census_map_spi = census_map_area %>%
 #save(census_map_spi, file = "./Data/census_map_spi.Rda")
 #load(file = "./Data/census_map_spi.Rda")
 
-## SOIL MOISTURE - 3 day lag 
-soil.names = list.files(path = "./Data/Soil_current", full.names = T, pattern = "\\.grb$") # get most recent day of hourly forecasts (3 day lag)
-for (i in 1:length(soil.names)){
-  temp_i = soil.names[i]
-  print(temp_i)
-  temp_rast = raster::brick(temp_i) #read in via raster brick
-  temp_proj = raster::projectRaster(temp_rast, crs = crs(census_map_area)) #project into crs
-  temp_terra = terra::rast(temp_proj) #convert to Spat Raster for easier masking and extraction
-  temp_crop = terra::crop(temp_terra, vect(census_map_area)) #crop to map
-  temp_mask = terra::mask(temp_crop, vect(census_map_area)) #mask to map (make anything outside NA)
-  temp_s26 = temp_mask[[26]] # soil moisture 0-10cm (kg/m^2)
-  temp_s27 = temp_mask[[27]] # soil moisture 10-40cm (kg/m^2)
-  temp_s28 = temp_mask[[28]] # soil moisture 40-100cm (kg/m^2)
-  # Extract soil layer values by tract 
-  temp_extract26 = terra::extract(x = temp_s26, y = vect(census_map_area)) %>% 
-    group_by(ID) %>%
-    summarise(across(everything(), mean, na.rm = TRUE))
-  temp_extract27 = terra::extract(x = temp_s27, y = vect(census_map_area)) %>%
-    group_by(ID) %>%
-    summarise(across(everything(), mean, na.rm = TRUE))
-  temp_extract28 = terra::extract(x = temp_s28, y = vect(census_map_area)) %>%
-    group_by(ID) %>%
-    summarise(across(everything(), mean, na.rm = TRUE))
-  # Join temp extractions by ID
-  temp_extract = temp_extract26 %>%
-    inner_join(temp_extract27, by = c("ID")) %>%
-    inner_join(temp_extract28, by = c("ID"))
-  colnames(temp_extract) = c("ID", "soil0_10", "soil10_40", "soil40_100")
-  # Add date_hour (character) variable whose value is the file name, formatted to match outage data ("2018-01-01T00:00:00Z")
-  temp_name1 = sub(".002.grb", "", sub(".*NLDAS_NOAH0125_H.A", "", temp_i)) #"YYYYMMDD.HHMM"
-  temp_name2 = paste(substr(temp_name1, 1, 4), "-", substr(temp_name1, 5, 6), "-", substr(temp_name1, 7, 8), "T", substr(temp_name1, 10, 11), ":", substr(temp_name1, 12, 13), ":00Z", sep = "")
-  temp_day = substr(temp_name2, 1,10)
-  temp_out = temp_extract
-  temp_out$date_hour = temp_name2
-  temp_out$date_day = temp_day
-  # Data-frame of GEOID, date-time (hourly and daily), and 3 soil moisture layer variables 
-  temp_map_soil = census_map_area %>%
-    bind_cols(temp_out) %>%
-    dplyr::select(-ID, -POPULATION) %>%
-    st_set_geometry(NULL)
-  if (i == 1) {
-    census_map_soil = temp_map_soil
-  }
-  else {
-    census_map_soil = census_map_soil %>%
-      bind_rows(temp_map_soil)
-  }
-}
-census_map_soil_day = census_map_soil %>%  
-  group_by(GEOID, date_day) %>%
-  summarise(soil10_3dLAG = mean(soil0_10, na.rm = T), 
-            soil40_3dLAG = mean(soil10_40, na.rm = T),
-            soil100_3dLAG = mean(soil40_100, na.rm = T)
-            )
-#save(census_map_soil_day, file = "./Data/census_map_soil_day.Rda")
-#load(file = "./Data/census_map_soil_day.Rda")
+# ## SOIL MOISTURE - 3 day lag 
+# soil.names = list.files(path = "./Data/Soil_current", full.names = T, pattern = "\\.grb$") # get most recent day of hourly forecasts (3 day lag)
+# for (i in 1:length(soil.names)){
+#   temp_i = soil.names[i]
+#   print(temp_i)
+#   temp_rast = raster::brick(temp_i) #read in via raster brick
+#   temp_proj = raster::projectRaster(temp_rast, crs = crs(census_map_area)) #project into crs
+#   temp_terra = terra::rast(temp_proj) #convert to Spat Raster for easier masking and extraction
+#   temp_crop = terra::crop(temp_terra, vect(census_map_area)) #crop to map
+#   temp_mask = terra::mask(temp_crop, vect(census_map_area)) #mask to map (make anything outside NA)
+#   temp_s26 = temp_mask[[26]] # soil moisture 0-10cm (kg/m^2)
+#   temp_s27 = temp_mask[[27]] # soil moisture 10-40cm (kg/m^2)
+#   temp_s28 = temp_mask[[28]] # soil moisture 40-100cm (kg/m^2)
+#   # Extract soil layer values by tract 
+#   temp_extract26 = terra::extract(x = temp_s26, y = vect(census_map_area)) %>% 
+#     group_by(ID) %>%
+#     summarise(across(everything(), mean, na.rm = TRUE))
+#   temp_extract27 = terra::extract(x = temp_s27, y = vect(census_map_area)) %>%
+#     group_by(ID) %>%
+#     summarise(across(everything(), mean, na.rm = TRUE))
+#   temp_extract28 = terra::extract(x = temp_s28, y = vect(census_map_area)) %>%
+#     group_by(ID) %>%
+#     summarise(across(everything(), mean, na.rm = TRUE))
+#   # Join temp extractions by ID
+#   temp_extract = temp_extract26 %>%
+#     inner_join(temp_extract27, by = c("ID")) %>%
+#     inner_join(temp_extract28, by = c("ID"))
+#   colnames(temp_extract) = c("ID", "soil0_10", "soil10_40", "soil40_100")
+#   # Add date_hour (character) variable whose value is the file name, formatted to match outage data ("2018-01-01T00:00:00Z")
+#   temp_name1 = sub(".002.grb", "", sub(".*NLDAS_NOAH0125_H.A", "", temp_i)) #"YYYYMMDD.HHMM"
+#   temp_name2 = paste(substr(temp_name1, 1, 4), "-", substr(temp_name1, 5, 6), "-", substr(temp_name1, 7, 8), "T", substr(temp_name1, 10, 11), ":", substr(temp_name1, 12, 13), ":00Z", sep = "")
+#   temp_day = substr(temp_name2, 1,10)
+#   temp_out = temp_extract
+#   temp_out$date_hour = temp_name2
+#   temp_out$date_day = temp_day
+#   # Data-frame of GEOID, date-time (hourly and daily), and 3 soil moisture layer variables 
+#   temp_map_soil = census_map_area %>%
+#     bind_cols(temp_out) %>%
+#     dplyr::select(-ID, -POPULATION) %>%
+#     st_set_geometry(NULL)
+#   if (i == 1) {
+#     census_map_soil = temp_map_soil
+#   }
+#   else {
+#     census_map_soil = census_map_soil %>%
+#       bind_rows(temp_map_soil)
+#   }
+# }
+# census_map_soil_day = census_map_soil %>%  
+#   group_by(GEOID, date_day) %>%
+#   summarise(soil10_3dLAG = mean(soil0_10, na.rm = T), 
+#             soil40_3dLAG = mean(soil10_40, na.rm = T),
+#             soil100_3dLAG = mean(soil40_100, na.rm = T)
+#             )
+# #save(census_map_soil_day, file = "./Data/census_map_soil_day.Rda")
+# #load(file = "./Data/census_map_soil_day.Rda")
 
 ## WIND SPEED - forecasts from StormGeo
 hurricane.frcst.files = list.files(path = "./Data/StormGEO/HarveyNC", full.names = T, pattern = "\\.nc$") #get forecast (NCDF4 format) 
@@ -289,23 +317,7 @@ census_map_WINDmax = hurricane.frcst.maps %>%
   mutate(WIND_max = pmax(!!!rlang::syms(max_wind_names), na.rm = T)) %>% # https://stackoverflow.com/questions/32978458/dplyr-mutate-rowwise-max-of-range-of-columns
   dplyr::select(GEOID, WIND_max)
 #save(census_map_WINDmax, file = "./Data/census_map_WINDmax.Rda")
-#load(file = "./Data/census_map_soil_day.Rda")  
-
-
-
-  
-i = 1
-asd = raster::raster(hurricane.frcst.files[i], varname = "wspd")
-asd2 = raster::projectRaster(asd, crs = crs(census_map_area))
-asd3 = terra::rast(asd2) 
-asd4 = terra::crop(asd3, vect(census_map_area))
-asd5 = terra::mask(asd4, vect(census_map_area)) #mask to map (make anything outside NA)
-asd6 = terra::extract(x = asd5, y = vect(census_map_area)) # extract values
-asd_group = asd6 %>% # group extracted data 
-  group_by(ID) %>%
-  summarize(WIND_mean = mean(X10.meter.Windspeed, na.rm = TRUE))
-census_map_wind = census_map_area %>% #join rz values
-  bind_cols(asd_group)
+#load(file = "./Data/census_map_WINDmax.Rda")  
 
 
 gg2 = ggplot(hurricane.frcst.max)+
@@ -325,65 +337,47 @@ gg2 = ggplot(hurricane.frcst.max)+
 gg2
 
 
-rast_df = as.data.frame(asd4, xy= TRUE)
-title = substr(hurricane.frcst.files[i], 26, 100)
-gg3 = ggplot() +
-  geom_tile(data = rast_df, aes(x = x, y = y, fill = X10.meter.Windspeed), alpha = 0.9) +
-  geom_sf(data = census_map_area, color = "black", fill = "Skyblue", lwd = 0.4) +
-  scale_fill_viridis_c(option="plasma", na.value = "grey10") +
-  theme_dark() +
-  ggtitle(paste(title)) + 
-  theme(plot.title = element_text(hjust = 0.5),
-        axis.title.x = element_blank(),
-        axis.title.y = element_blank()
-  )
-gg3
-
-
-
-
-############ COUNTY PLOTTING 
-
-county_map = get_acs(geography = "county", state = state,
-                     variables=c("B01003_001"), year = year, geometry = TRUE, 
-                     cache_table = TRUE)
-county_map = county_map %>%
-  mutate(POPULATION = estimate) %>%
-  dplyr::select(GEOID, NAME, POPULATION) %>% 
-  st_transform(mycrs) # project to Conic Equal Area Albers, EPSG:5070 
-
-county_map_area = county_map %>%  
-  mutate(AREA = as.vector(st_area(county_map))) %>% #sq-meters; as.vector removes units suffix 
-  mutate(DENSITY = POPULATION / AREA * 1000^2) #population per sq-km 
-
-i = 60
-csd = raster::raster(hurricane.frcst.files[i], varname = "wspd")
-csd2 = raster::projectRaster(csd, crs = crs(county_map_area))
-csd3 = terra::rast(csd2) #convert to Spat Raster for easier masking and extraction
-csd4 = terra::crop(csd3, vect(county_map_area)) #crop to map
-csd5 = terra::mask(csd4, vect(county_map_area)) #mask to map (make anything outside NA)
-csd6 = terra::extract(x = csd5, y = vect(county_map_area)) # extract values
-csd_group = csd6 %>% # group extracted data 
-  group_by(ID) %>%
-  summarize(WIND_mean = mean(X10.meter.Windspeed, na.rm = TRUE))
-county_map_wind = county_map_area %>% #join rz values
-  bind_cols(csd_group)
-
-county_map_Harris = county_map_area %>%
-  dplyr::filter(GEOID == "48201")
-rast_df = as.data.frame(csd3, xy= TRUE)
-title = substr(hurricane.frcst.files[i], 26, 100)
-
-gg3 = ggplot() +
-  geom_tile(data = rast_df, aes(x = x, y = y, fill = X10.meter.Windspeed), alpha = 0.9) +
-  geom_sf(data = county_map_area, color = "black", fill = "NA", lwd = 0.4) +
-  geom_sf(data = county_map_Harris, color = "black", fill = "Skyblue", lwd = 0.4) +
-  scale_fill_viridis_c(option="plasma", na.value = "grey10") +
-  theme_dark() +
-  ggtitle(paste(title)) + 
-  theme(plot.title = element_text(hjust = 0.5),
-        axis.title.x = element_blank(),
-        axis.title.y = element_blank()
-  )
-gg3
+# ############ COUNTY HURICANE 
+# county_map = get_acs(geography = "county", state = state,
+#                      variables=c("B01003_001"), year = year, geometry = TRUE, 
+#                      cache_table = TRUE)
+# county_map = county_map %>%
+#   mutate(POPULATION = estimate) %>%
+#   dplyr::select(GEOID, NAME, POPULATION) %>% 
+#   st_transform(mycrs) # project to Conic Equal Area Albers, EPSG:5070 
+# 
+# county_map_area = county_map %>%  
+#   mutate(AREA = as.vector(st_area(county_map))) %>% #sq-meters; as.vector removes units suffix 
+#   mutate(DENSITY = POPULATION / AREA * 1000^2) #population per sq-km 
+# 
+# i = 60
+# csd = raster::raster(hurricane.frcst.files[i], varname = "wspd")
+# csd2 = raster::projectRaster(csd, crs = crs(county_map_area))
+# csd3 = terra::rast(csd2) #convert to Spat Raster for easier masking and extraction
+# csd4 = terra::crop(csd3, vect(county_map_area)) #crop to map
+# csd5 = terra::mask(csd4, vect(county_map_area)) #mask to map (make anything outside NA)
+# csd6 = terra::extract(x = csd5, y = vect(county_map_area)) # extract values
+# csd_group = csd6 %>% # group extracted data 
+#   group_by(ID) %>%
+#   summarize(WIND_mean = mean(X10.meter.Windspeed, na.rm = TRUE))
+# county_map_wind = county_map_area %>% #join rz values
+#   bind_cols(csd_group)
+# 
+# county_map_Harris = county_map_area %>%
+#   dplyr::filter(GEOID == "48201")
+# rast_df = as.data.frame(csd3, xy= TRUE)
+# title = substr(hurricane.frcst.files[i], 26, 100)
+# 
+# gg3 = ggplot() +
+#   geom_tile(data = rast_df, aes(x = x, y = y, fill = X10.meter.Windspeed), alpha = 0.9) +
+#   geom_sf(data = county_map_area, color = "black", fill = "NA", lwd = 0.4) +
+#   geom_sf(data = county_map_Harris, color = "black", fill = "Skyblue", lwd = 0.4) +
+#   scale_fill_viridis_c(option="plasma", na.value = "grey10") +
+#   theme_dark() +
+#   ggtitle(paste(title)) + 
+#   theme(plot.title = element_text(hjust = 0.5),
+#         axis.title.x = element_blank(),
+#         axis.title.y = element_blank()
+#   )
+# gg3
 

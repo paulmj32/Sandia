@@ -6,14 +6,31 @@
 # https://www.drought.gov/data-maps-tools/us-gridded-standardized-precipitation-index-spi-nclimgrid-monthly
 # NWS has most recent observations of SPI (3mth, 6mth, 12mth, 24mth) and forecasts: https://www.cpc.ncep.noaa.gov/products/Drought/Monitoring/spi.shtml
 
+library(tidyverse)
+library(tidycensus)
+library(sf)
 library(raster)
+library(terra)
+setwd("~/Documents/01_VECTOR.nosync/Sandia")
 
 ### USER INPUTS
-t_begin = "X2018.01.01" # starting value for data, in "XYYYY.MM.DD" format 
-t_end = "X2018.12.01"
+t_begin = "X2014.01.01" # starting value for data, in "XYYYY.MM.DD" format 
+t_end = "X2019.12.01"
 file.names = list.files(path = "./Data/SPI_ncdf", full.names = T, pattern = "\\.nc$") 
 
 ########################################################################
+mycrs = 5070 #chose projected coordinate system: EPSG 5070 NAD83 Conus Albers
+year=2019 # year for county boundaries 
+options(tigris_use_cache = TRUE) #cache shapefiles for future sessions
+state_list = c("AL", "AR", "AZ", "CA", "CO", "CT", "DE", "FL", "GA", "IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MI", "MN", "MO", "MS", "MT", "NC", "ND", "NE", "NH", "NJ", "NM", "NV", "NY", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VT", "WA", "WI", "WV", "WY")
+county_map = get_acs(geography = "county", state = state_list,
+                     variables=c("B01003_001"), year = year, geometry = TRUE, 
+                     cache_table = TRUE)
+county_map = county_map %>%
+  mutate(POPULATION = estimate) %>%
+  dplyr::select(GEOID, NAME, POPULATION) 
+county_map_proj = county_map %>% 
+  st_transform(mycrs) # project to Conic Equal Area Albers, EPSG:5070 
 
 spi_list = ls()
 
@@ -32,13 +49,14 @@ for (i in 1:length(file.names)){
   spi_subset = raster::subset(spi_brick, which(spi_names == t_begin):which(spi_names == t_end))
   spi_names_sub = names(spi_subset)
   
+  # project to my crs
+  spi_proj = raster::projectRaster(spi_subset, crs = crs(county_map_proj)) #project raster into my crs
+  
   # convert to SpatRaster (makes for easier projection and extraction) 
-  spi_rast = rast(spi_subset)
-  terra::crs(spi_rast)
+  spi_spat = terra::rast(spi_proj)
   
   # project, crop, and mask rasters
-  spi_proj = terra::project(spi_rast, paste("EPSG:", mycrs)) #transform raster into my CRS
-  spi_crop = terra::crop(spi_proj, vect(county_map_proj)) #crop to map
+  spi_crop = terra::crop(spi_spat, vect(county_map_proj)) #crop to map
   spi_mask = terra::mask(spi_crop, vect(county_map_proj)) #mask to map (make anything outside NA)
   
   # extract SPI layer for each county 
@@ -58,12 +76,13 @@ for (i in 1:length(file.names)){
     st_set_geometry(NULL)
   
   # variable name 
-  s = colnames(spi_ext)[2] #get spi variable name
-  t = gsub("^([^_]*_[^_]*)_.*$", "\\1", s) #get pattern before second "-" 
+  s = sub(".*pearson-", "", file_nm) #get spi variable name
+  t = sub("*.nc", "", s)
+  varname = paste("spi", t, sep = "")
   
   # wide to long format
   county_map_spi_l = county_map_spi_w %>%
-    pivot_longer(paste(name1), names_to = "Date", values_to = paste(t))
+    pivot_longer(paste(name1), names_to = "Date", values_to = paste(varname))
  
   # put SPI values into a list
   spi_list[[i]] = data.frame(county_map_spi_l[,4]) #just take SPI value for column in data.frame
@@ -90,5 +109,4 @@ save(county_map_spi, file = "./Data/county_map_spi.Rda")
 # pdf("figure_spi03.pdf", width = 7.48, height = 4.5)
 # gg2
 # dev.off()
-
 

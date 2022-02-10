@@ -13,6 +13,7 @@ library(stars)
 library(raster) #make sure ncdf4 package is installed 
 library(lubridate)
 library(spdep)
+library(xgboost)
 
 setwd("~/Documents/01_VECTOR.nosync/Sandia")
 
@@ -47,7 +48,9 @@ load(file = "./Data/census_map_social.Rda") #Socio-economic
 census_map_social = census_map_social %>% st_set_geometry(NULL)
 load(file = "./Data/census_map_spi.Rda") #SPI 
 census_map_spi = census_map_spi %>% st_set_geometry(NULL)
-load(file = "./Data/census_map_soil_day.Rda") #Soil Moisture
+#load(file = "./Data/census_map_soil_day.Rda") #Soil Moisture
+load(file = "./Data/census_map_WINDmax.Rda") #Hurricane Forecast
+census_map_WINDmax = census_map_WINDmax %>% st_set_geometry(NULL)
 
 census_map_CLEAN = census_map_area %>%
   dplyr::select(GEOID, DENSITY) %>%
@@ -56,38 +59,57 @@ census_map_CLEAN = census_map_area %>%
   inner_join(dplyr::select(census_map_rz, c(GEOID, RZ_mean:RZ_mode)), by = "GEOID") %>%
   inner_join(dplyr::select(census_map_social, c(GEOID, 1, 6:ncol(census_map_social))), by = "GEOID") %>%
   inner_join(dplyr::select(census_map_spi, c(GEOID, spi03_mean:spi24_mean)), by = "GEOID") %>%
-  inner_join(dplyr::select(census_map_soil_day, c(GEOID, soil10_3dLAG:soil100_3dLAG)), by = "GEOID") %>%
+  #inner_join(dplyr::select(census_map_soil_day, c(GEOID, soil10_3dLAG:soil100_3dLAG)), by = "GEOID") %>%
+  inner_join(census_map_WINDmax, by = "GEOID") %>%
   rename(spi03_lag = spi03_mean, spi12_lag = spi12_mean, spi24_lag = spi24_mean, 
-         soil10_lag = soil10_3dLAG, soil40_lag = soil40_3dLAG, soil100_lag = soil100_3dLAG,
+         #soil10_lag = soil10_3dLAG, soil40_lag = soil40_3dLAG, soil100_lag = soil100_3dLAG,
          Density = DENSITY)
 
-#impute missing values based on neighboring polygons
-# https://stackoverflow.com/questions/62915873/how-to-fill-missing-values-based-on-neighboring-polygons-in-r
-which(is.na(census_map_CLEAN), arr.ind = T)
-index = st_touches(census_map_CLEAN, census_map_CLEAN) #find neighbors 
-# asd = census_map_CLEAN %>% 
-#   mutate(DEM_sd = ifelse(is.na(DEM_sd), apply(index, 1, function(i){mean(.$DEM_sd[i], na.rm = T)}), DEM_sd))
-varnames = colnames(census_map_CLEAN)
-varnames = varnames[!(varnames %in%c("GEOID", "geometry"))]
-imputeNN = function(y){ifelse(is.na(y), apply(index, 1, function(i){mean(y[i], na.rm = T)}), y)} #impute average of neighbors
-census_map_FINAL = census_map_CLEAN %>% 
-  mutate(across(all_of(varnames), ~ imputeNN(.x)))
-
-
 ##############################################################################################
-### BART MODEL ###############################################################################
+### MODELS ###################################################################################
 ##############################################################################################
-load(file = "bart_civic.Rda")  #load trained model 
+### XGB Final Model
+census_map_FINAL = census_map_CLEAN
+load(file = "xgb_final_model.Rda") 
 X = census_map_FINAL %>%
-  dplyr::select(c("spi24_lag","Density", "Developed", "QMOHO", "soil100_lag" , "QFEMALE", "QNATIVE", "spi12_lag", "Wetlands", "RZ_mean")) %>%
-  st_set_geometry(NULL)
-model_name = paste("Predicting Outages - No Weather Data - Harris County, TX")
-predictions = predict(bart, X)
+  dplyr::select(xgb_final_model$feature_names) %>%
+  st_set_geometry(NULL) %>%
+  as.matrix()
+predictions = predict(xgb_final_model, X)
 
+# Without dynamic weather
+X_static = census_map_FINAL %>%
+  dplyr::select(xgb_final_model$feature_names) %>%
+  mutate(WIND_max = NA) %>% 
+  st_set_geometry(NULL) %>%
+  as.matrix()
+predictions_static = predict(xgb_final_model, X_static)
 
+# ### BART Final Model
+# #impute missing values based on neighboring polygons
+# # https://stackoverflow.com/questions/62915873/how-to-fill-missing-values-based-on-neighboring-polygons-in-r
+# which(is.na(census_map_CLEAN), arr.ind = T)
+# index_all = st_touches(census_map_CLEAN, census_map_CLEAN) #find all neighbors 
+# varnames = colnames(census_map_CLEAN)
+# varnames = varnames[!(varnames %in%c("GEOID", "geometry"))]
+# imputeNN = function(y){ifelse(is.na(y), apply(index, 1, function(i){mean(y[i], na.rm = T)}), y)} #impute average of neighbors
+# census_map_FINAL = census_map_CLEAN %>% 
+#   mutate(across(all_of(varnames), ~ imputeNN(.x)))
+# load(file = "bart_civic.Rda")  #load trained model 
+# X = census_map_FINAL %>%
+#   dplyr::select(c("spi24_lag","Density", "Developed", "QMOHO", "soil100_lag" , "QFEMALE", "QNATIVE", "spi12_lag", "Wetlands", "RZ_mean")) %>%
+#   st_set_geometry(NULL)
+# model_name = paste("Predicting Outages - No Weather Data - Harris County, TX")
+# predictions = predict(bart, X)
+
+##############################################################################################
+### RISK MAP #################################################################################
+##############################################################################################
 Harris_map = census_map_FINAL %>%
   mutate(risk = predictions) %>%
-  mutate(risk01 = (risk - min(predictions)) / (max(predictions) - min(predictions)))
+  mutate(risk_static = predictions_static) %>% 
+  mutate(risk01 = (risk - min(predictions)) / (max(predictions) - min(predictions))) %>%
+  mutate(risk01_static = (risk_static - min(predictions_static)) / (max(predictions_static) - min(predictions_static)))
 
 ## Exploratory Spatial Analysis with spdep package
 # https://walker-data.com/census-r/spatial-analysis-with-us-census-data.html#spatial-analysis-with-us-census-data
@@ -96,10 +118,13 @@ weights = nb2listw(neighbors, style = "W") #weight-based (i.e., all neighbors su
 moran.test(Harris_map$risk01, weights) #Moran's I test: positive statistic and low p-value --> reject null hypothesis of spatial randomness
 localg_weights = nb2listw(include.self(neighbors)) #include self as a neighbor for Local Gi* test
 local_gistar = localG(Harris_map$risk01, localg_weights)
-Harris_map$gistar = local_gistar
+local_gistar_static = localG(Harris_map$risk01_static, localg_weights)
 
+Harris_map$gistar = local_gistar
+Harris_map$gistar_static = local_gistar_static
 Harris_map = Harris_map %>%
-  mutate(gistar01 = (gistar - min(local_gistar)) / (max(local_gistar) - min(local_gistar)))
+  mutate(gistar01 = (gistar - min(local_gistar)) / (max(local_gistar) - min(local_gistar))) %>%
+  mutate(gistar01_static = (gistar_static - min(local_gistar_static)) / (max(local_gistar_static) - min(local_gistar_static)))
 
 gg2 = ggplot(Harris_map)+
   geom_sf(aes(fill = gistar01), color = NA) + 
@@ -109,7 +134,7 @@ gg2 = ggplot(Harris_map)+
   #guides(fill = "none") + #removes legend
   #theme_minimal()  #removes background
   theme_dark() +
-  labs(title = "Harris County - Power Outage Risk", fill = "Risk") + 
+  labs(title = "Harris County - Power Outage Risk (Static)", fill = "Risk") + 
   theme(plot.title = element_text(hjust = 0.5),
         axis.title.x = element_blank(),
         axis.title.y = element_blank()

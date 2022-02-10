@@ -23,7 +23,7 @@ unregister_dopar = function() {
 }
 
 #### LOAD VARIABLES ##############################################################################
-load("./Data/SandiaVariables.Rda") #from Sandia1_vars.R
+load("./Data/SandiaVariables.Rda") #from Sandia1_data.R
 load(file = "Data/outages.Rda")
 outages_csv$fips_code = as.character(outages_csv$fips_code)
 fips = outages_csv$fips_code
@@ -164,6 +164,7 @@ lre_predictions = lre_fit %>% collect_predictions() #predictions for test sample
 ## GBM 
 #https://www.r-bloggers.com/2020/05/using-xgboost-with-tidymodels/
 # https://datascience.stackexchange.com/questions/15305/how-does-xgboost-learn-what-are-the-inputs-for-missing-values
+# https://www.capitalone.com/tech/machine-learning/how-to-control-your-xgboost-model/
 show_model_info("boost_tree")
 gb_model = boost_tree(mode = "regression", trees = 1000, 
                       min_n = tune(), tree_depth = tune(), learn_rate = tune(), loss_reduction = tune()) %>%
