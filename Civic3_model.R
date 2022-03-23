@@ -107,8 +107,8 @@ predictions_static = predict(xgb_final_model, X_static)
 ##############################################################################################
 Harris_map = census_map_FINAL %>%
   mutate(risk = predictions) %>%
-  mutate(risk_static = predictions_static) %>% 
   mutate(risk01 = (risk - min(predictions)) / (max(predictions) - min(predictions))) %>%
+  mutate(risk_static = predictions_static) %>% 
   mutate(risk01_static = (risk_static - min(predictions_static)) / (max(predictions_static) - min(predictions_static)))
 
 ## Exploratory Spatial Analysis with spdep package
@@ -134,7 +134,7 @@ gg2 = ggplot(Harris_map)+
   #guides(fill = "none") + #removes legend
   #theme_minimal()  #removes background
   theme_dark() +
-  labs(title = "Harris County - Power Outage Risk (Static)", fill = "Risk") + 
+  labs(title = "Harris County - Power Outage Risk", fill = "Risk") + 
   theme(plot.title = element_text(hjust = 0.5),
         axis.title.x = element_blank(),
         axis.title.y = element_blank()
@@ -862,8 +862,8 @@ obj3_tracts = c('48201100000',
                 '48201980000')
 
 obj3_out = Harris_map %>%
-  dplyr::filter(GEOID %in% obj3_tracts) %>%
+  #dplyr::filter(GEOID %in% obj3_tracts) %>%
   arrange(GEOID) %>%
-  dplyr::select(GEOID, gistar01) %>%
+  dplyr::select(GEOID, risk01, gistar01) %>%
   st_set_geometry(NULL)
 write.csv(obj3_out, file = "./Data/obj3_out.csv", row.names = FALSE)

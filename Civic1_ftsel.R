@@ -231,11 +231,42 @@ head(importance, n = 15)
 vip(xgb_train$fit, n = 20)
 
 
+## Lasso/Ridge/ElasticNet 
+show_model_info("linear_reg")
+lre_model = linear_reg(penalty = tune(), mixture = tune()) %>% #lambda (penalty) and alpha/mixture (1 lasso, 0 ridge)
+  set_engine("glmnet") %>%
+  translate()
+lre_work = workflow() %>% 
+  add_recipe(cust_recipe) %>%
+  add_model(lre_model)
+set.seed(32); lre_grid = dials::grid_max_entropy(parameters(penalty(), mixture()), size = 40)
+cl = makeCluster(num_cores, type = "FORK")
+registerDoParallel(cl, cores = num_cores)
+lre_tune = lre_work %>%
+  tune_grid(resamples = df_cv,
+            grid = lre_grid,
+            metrics = metric_set(yardstick::rmse, yardstick::rsq),
+            control = tune::control_grid(verbose = T, allow_par = T, parallel_over = "resamples")
+  ) #parallel processing turns off verbose
+stopCluster(cl) 
+unregister_dopar()
+show_best(lre_tune, metric = "rmse")
+lre_tune_results = lre_tune %>% collect_metrics()
+lre_best = lre_tune %>% select_best(metric = "rmse")
+lre_fit = lre_work %>%
+  finalize_workflow(lre_best) %>%
+  last_fit(df_split)
+lre_test = lre_fit %>% collect_metrics() #metrics evaluated on test sample (b/c last_fit() function) 
+lre_predictions = lre_fit %>% collect_predictions() #predictions for test sample (b/c last_fit() function)
+
+
+
 ##############################################################################################################
 #### PLOTTING ################################################################################################
 ##############################################################################################################
 gg_test = dplyr::tibble(actual = y_test,
-                        bart = bart_test,
+                        #bart = bart_test,
+                        eNet = as.vector(lre_predictions$.pred), 
                         xgb = as.vector(xgb_predictions$.pred)
                         )
 gg_test = arrange(gg_test, actual)
@@ -282,7 +313,10 @@ p_wind =  pdp::partial(xgb_final_model, pred.var = "WIND_max", ice = T, center =
   ggtitle("PDP and ICE - Max Wind Speed (m/s)") + 
   annotate("text", x =12.5, y = 6, label="Tropical Storm Wind Forecast", color="blue", size = 3) 
 
-
+p_oth =  pdp::partial(xgb_final_model, pred.var = "spi03_lag", ice = T, center = F,
+                       plot = T, rug= T, alpha = 0.1, plot.engine = "ggplot2",
+                       train = as.data.frame(cust_juice %>% dplyr::select(-ln_cust)), type = "regression") +
+  ggtitle("PDP and ICE Plot") 
 
 ##### PLOT FINAL MODEL (ON TRAINING SET) WITH AND WITHOUT DYNAMIC FORECAST
 xgb_final_train = xgb_work %>%

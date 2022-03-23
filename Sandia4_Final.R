@@ -55,7 +55,7 @@ county_map_proj = county_map %>%
 county_map_area = county_map_proj %>%  
   mutate(AREA = as.vector(st_area(county_map_proj))) %>% #sq-meters; as.vector removes units suffix 
   mutate(DENSITY = POPULATION / AREA * 1000^2) %>% #population per sq-km 
-  dplyr::select(-c(POPULATION, AREA, NAME))
+  dplyr::select(-c(AREA, NAME))
 
 ## Get environmental data
 # NLCD (static)
@@ -101,7 +101,7 @@ county_map_JOIN = county_map_area %>%
 county_map_ALL = county_map_JOIN %>%
   dplyr::select(-c(outage_number, start_dt, start_ym, end_dt, end_ym)) %>%
   dplyr::select(-c(max_WIND2M, max_WIND50M, min_humidity_2M, mean_humidity_2M, max_humidity_2M,
-                   min_T2M, mean_T2M, max_T2M, delta_T2M, min_T10M_C:delta_T10M_C, WETLAND
+                   min_T2M, mean_T2M, max_T2M, delta_T2M, min_T10M_C:delta_T10M_C, WETLAND, NUCACC
                    )) #take extraneous variables
   
 rm(list=setdiff(ls(), c("county_map_JOIN", "county_map_ALL"))) 
@@ -115,8 +115,8 @@ df_data = county_map_ALL %>%
   #dplyr::filter(duration_hr > quantile(county_map_ALL$duration_hr, .9)) %>% #filter to big events 
   dplyr::filter(duration_hr >= 12) %>% #filter to events >12 hrs ... 95% quantile for full dataset
   dplyr::filter(duration_hr < 3000) %>% #get rid of faulty data
-  mutate(ln_cust = log(max_pct_affected), ln_hrs = log(duration_hr)) %>% # take log of DVs
-  dplyr::select(-c(max_pct_affected, duration_hr, GEOID)) %>%
+  mutate(ln_cust = log(max_pct_affected * POPULATION), ln_hrs = log(duration_hr)) %>% # take log of DVs
+  dplyr::select(-c(max_pct_affected, duration_hr, GEOID, POPULATION)) %>%
   relocate(c(ln_cust, ln_hrs)) %>%
   st_set_geometry(NULL)
 
@@ -137,7 +137,7 @@ df_cv = vfold_cv(df_train, v = 10, repeats = 1)
 
 ## Pre-processing
 cust_recipe = recipe(ln_cust ~ . , data = df_data) %>%
-  step_rm(ln_hrs) %>% 
+  step_rm(ln_hrs, contains("total")) %>% 
   step_impute_knn(all_predictors()) %>% #knn impute missing predictors (if any)
   # step_normalize(all_predictors()) %>% #z-score standardize all predictors (important for PLS or NN)
   step_zv(all_predictors()) %>% #removes predictors of single value 
@@ -146,7 +146,8 @@ cust_prep = prep(cust_recipe) #see changes
 df_cust = prep(cust_recipe) %>% juice() #apply recipe to data frame 
 
 hours_recipe = recipe(ln_hrs ~ . , data = df_data) %>%
-  step_rm(ln_cust) %>% 
+  #step_rm(ln_cust) %>% 
+  step_rm(ln_cust, contains("total")) %>% 
   step_impute_knn(all_predictors()) %>% #knn impute missing predictors (if any)
   # step_normalize(all_predictors()) %>% #z-score standardize all predictors (important for PLS or NN)
   step_zv(all_predictors()) %>% #removes predictors of single value 
@@ -154,20 +155,13 @@ hours_recipe = recipe(ln_hrs ~ . , data = df_data) %>%
 hours_prep = prep(hours_recipe) #shows changes 
 df_hours = prep(hours_recipe) %>% juice() #apply recipe to data frame
 
-# X_cust = df_cust %>% slice(df_split$in_id) %>% dplyr::select(-ln_cust) %>% as.data.frame()
-# y_cust = df_cust %>% slice(df_split$in_id) %>% dplyr::select(ln_cust) %>% pull()
-# X_cust_test = df_cust %>% slice(-df_split$in_id) %>% dplyr::select(-ln_cust) %>% as.data.frame()
-# y_cust_test = df_cust %>% slice(-df_split$in_id) %>% dplyr::select(ln_cust) %>% pull()
-# X_hours = df_hours %>% slice(df_split$in_id) %>% dplyr::select(-ln_hrs) %>% as.data.frame()
-# y_hours = df_hours %>% slice(df_split$in_id) %>% dplyr::select(ln_hrs) %>% pull()
-# X_hours_test = df_hours %>% slice(-df_split$in_id) %>% dplyr::select(-ln_hrs) %>% as.data.frame()
-# y_hours_test = df_hours %>% slice(-df_split$in_id) %>% dplyr::select(ln_hrs) %>% pull()
-
 ##########################################################################################################
 #### MACHINE LEARNING ####################################################################################
 ##########################################################################################################
-X = df_hours %>% dplyr::select(-ln_hrs)
-y = df_hours %>% dplyr::select(ln_hrs) %>% pull()
+#X = df_hours %>% dplyr::select(-ln_hrs) %>% as.data.frame()
+X = df_cust %>% dplyr::select(-ln_cust) %>% as.data.frame() 
+#y = df_hours %>% dplyr::select(ln_hrs) %>% pull()
+y = df_cust %>% dplyr::select(ln_cust) %>% pull()
 
 #https://www.tidyverse.org/blog/2020/11/tune-parallel/
 ## Lasso/Ridge/ElasticNet 
@@ -176,8 +170,8 @@ lre_model = linear_reg(penalty = tune(), mixture = tune()) %>% #lambda (penalty)
   set_engine("glmnet") %>%
   translate()
 lre_work = workflow() %>% 
-  #add_recipe(cust_recipe) %>%
-  add_recipe(hours_recipe) %>%
+  add_recipe(cust_recipe) %>%
+  #add_recipe(hours_recipe) %>%
   add_model(lre_model)
 #lre_grid = dials::grid_regular(parameters(penalty(), mixture()), levels = c(5, 5))
 set.seed(32); lre_grid = dials::grid_max_entropy(parameters(penalty(), mixture()), size = 40)
@@ -237,10 +231,10 @@ xgb_model = boost_tree(mode = "regression", trees = tune(), min_n = tune(), tree
   set_engine(engine = "xgboost") %>%
   translate()
 xgb_work = workflow() %>%
-  #add_recipe(cust_recipe) %>%
-  add_recipe(hours_recipe) %>%
+  add_recipe(cust_recipe) %>%
+  #add_recipe(hours_recipe) %>%
   add_model(xgb_model)
-set.seed(32); xgb_grid = dials::grid_max_entropy(parameters(trees(), min_n(), tree_depth(), learn_rate(), loss_reduction(), finalize(mtry(), df_cust)), size = 100)
+set.seed(32); xgb_grid = dials::grid_max_entropy(parameters(trees(), min_n(), tree_depth(), learn_rate(), loss_reduction(), finalize(mtry(), df_hours)), size = 100)
 cl = makeCluster(num_cores, type = "FORK")
 registerDoParallel(cl, cores = num_cores)
 xgb_tune = xgb_work %>%
@@ -261,7 +255,8 @@ xgb_test = xgb_fit %>% collect_metrics() #metrics evaluated on test sample (b/c 
 xgb_predictions = xgb_fit %>% collect_predictions() #predictions for test sample (b/c last_fit() function)
 
 ## Testing results
-y_test = df_hours %>% slice(-df_split$in_id) %>% dplyr::select(ln_hrs) %>% pull()
+#y_test = df_hours %>% slice(-df_split$in_id) %>% dplyr::select(ln_hrs) %>% pull()
+y_test = df_cust %>% slice(-df_split$in_id) %>% dplyr::select(ln_cust) %>% pull()
 
 rsq_lre = paste(lre_test %>% dplyr::filter(.metric == "rsq") %>% pull(.estimate) %>% round(3) %>% format(nsmall = 3))
 rsq_xgb = paste(xgb_test %>% dplyr::filter(.metric == "rsq") %>% pull(.estimate) %>% round(3) %>% format(nsmall = 3))
@@ -271,8 +266,25 @@ cverror_lre = paste(show_best(lre_tune, metric = "rmse") %>% dplyr::slice(1) %>%
 cverror_xgb = paste(show_best(xgb_tune, metric = "rmse") %>% dplyr::slice(1) %>% pull(mean) %>% round(3) %>% format(nsmall = 3))
 cverror_rf = paste(show_best(rf_tune, metric = "rmse") %>% dplyr::slice(1) %>% pull(mean) %>% round(3) %>% format(nsmall = 3))
 
+### PLOTTING 
+gg = dplyr::tibble(actual = y_test,
+                   eNet = as.vector(lre_predictions$.pred),
+                   #rf = as.vector(rf_predictions$.pred),
+                   xgb = as.vector(xgb_predictions$.pred)
+)
+gg = arrange(gg, actual)
+gg$index = seq.int(nrow(gg))
+#gg$mean = mean(gg$actual, na.rm = T)
+gg_actual = gg %>% dplyr::select(index, actual)
+gg_pred = gg %>% dplyr::select(-actual) %>% pivot_longer(!index, names_to = "Model", values_to = "ypred")
+gg_all = gg %>% pivot_longer(!index, names_to = "Model", values_to = "ypred")
+
+
+color_vec= c("black", "#FDE725FF", "#35B779FF")
 color_vec = c("black", "#FDE725FF", "#35B779FF", "#440154FF")
+lty_vec = c(1, 1, 1)
 lty_vec = c(1, 1, 1, 1)
+alpha_vec = c(1, 0.7, 0.7)
 alpha_vec = c(1, 0.7, 0.7, 0.7)
 
 # ggplot (for all)
@@ -285,7 +297,7 @@ plot_filtering_estimates2 <- function(df) {
       values = color_vec, 
       labels = c("Actual",
                  bquote("eNET (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
-                 bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
+                 #bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
                  bquote("XGB (" * R^2 ~ "=" ~ .(rsq_xgb) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_xgb) * ")")
                  ),
     name = element_blank()) +
@@ -293,7 +305,7 @@ plot_filtering_estimates2 <- function(df) {
       values = lty_vec,
       labels = c("Actual",
                  bquote("eNET (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
-                 bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
+                 #bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
                  bquote("XGB (" * R^2 ~ "=" ~ .(rsq_xgb) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_xgb) * ")")         
                  ),
       name = element_blank()) + 
@@ -301,14 +313,14 @@ plot_filtering_estimates2 <- function(df) {
       values = alpha_vec,
       labels = c("Actual",
                  bquote("eNET (" * R^2 ~ "=" ~ .(rsq_lre) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_lre) * ")"), 
-                 bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
+                 #bquote("RF (" * R^2 ~ "=" ~ .(rsq_rf) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_rf) * ")"), 
                  bquote("XGB (" * R^2 ~ "=" ~ .(rsq_xgb) * "," ~ RMSE[cv] ~ "=" ~ .(cverror_xgb) * ")")
                  ),
       name = element_blank()) + 
-    ylab("Outage Duration (log hours)") + 
+    ylab("Max Cust Outages (log)") + 
     scale_y_continuous(labels = function(x) paste0(x)) +
     xlab("Outage Index (event x county)") +
-    ggtitle("County-Level Predictions: Test Sample") + 
+    ggtitle("County-Level Predictions: Test Sample\nNo 'Total' Variables") + 
     # guides(
     #   color = guide_legend(order = 2),
     #   shape = guide_legend(order = 1),
@@ -342,7 +354,7 @@ final_obj = extract_fit_parsnip(final_model)$fit
 importance = xgb.importance(model = final_obj)
 head(importance, n = 15); vip(final_obj, n = 20)
 
-pdp_totvapor = pdp::partial(final_obj, pred.var = "total_vapor", ice = F, center = F,
+pdp_NUCACC = pdp::partial(final_obj, pred.var = "NUCACC", ice = F, center = F,
                     plot = T, rug= T, alpha = 0.1, #plot.engine = "ggplot2",
                     train = X, type = "regression")
 pdp_delpress = pdp::partial(final_obj, pred.var = "delta_pressure", ice = F, center = F,
