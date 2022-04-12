@@ -19,7 +19,6 @@ year=2019 # year for county boundaries
 
 # Get map
 options(tigris_use_cache = TRUE) #cache shapefiles for future sessions
-soptions(tigris_use_cache = TRUE) #to cache shapefiles for future sessions
 state = "Texas"
 county = c("Harris County")
 census_map = get_acs(geography = "tract", state = state, county = county,

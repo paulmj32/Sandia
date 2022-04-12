@@ -384,3 +384,50 @@ grid.arrange(pdp_totvapor, pdp_delpress, pdp_minhumid, pdp_totliq, pdp_deltemp, 
 
 ### View tree diagram 
 # xgb.plot.tree(model = final_obj, trees = 1:2) 
+
+## MAPS
+df_plot = county_map_ALL %>%
+  dplyr::filter(duration_hr >= 12) %>% #filter to events >12 hrs ... 95% quantile for full dataset
+  dplyr::filter(duration_hr < 3000) #get rid of faulty data
+X = df_plot %>%
+  st_set_geometry(NULL) %>%
+  dplyr::select(final_obj$feature_names) %>%
+  as.matrix()
+predictions = predict(final_obj, X)
+df_plot2 = df_plot %>%
+  dplyr::select(GEOID) %>%
+  st_set_geometry(NULL) %>%
+  mutate(fit = predictions) %>%
+  group_by(GEOID) %>%
+  summarise(fit_mean = mean(fit))
+
+
+mycrs = 5070 #chose projected coordinate system: EPSG 5070 NAD83 Conus Albers
+year=2019 # year for county boundaries 
+options(tigris_use_cache = TRUE) #cache shapefiles for future sessions
+state_list = c("AL", "AR", "AZ", "CA", "CO", "CT", "DE", "FL", "GA", "IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MI", "MN", "MO", "MS", "MT", "NC", "ND", "NE", "NH", "NJ", "NM", "NV", "NY", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VT", "WA", "WI", "WV", "WY")
+county_map = get_acs(geography = "county", state = state_list,
+                     variables=c("B01003_001"), year = year, geometry = TRUE, 
+                     cache_table = TRUE)
+county_map = county_map %>%
+  mutate(POPULATION = estimate) %>%
+  dplyr::select(GEOID, NAME, POPULATION) 
+county_map_proj = county_map %>% 
+  st_transform(mycrs) # project to Conic Equal Area Albers, EPSG:5070 
+county_map_area = county_map_proj %>%  
+  mutate(AREA = as.vector(st_area(county_map_proj))) %>% #sq-meters; as.vector removes units suffix 
+  mutate(DENSITY = POPULATION / AREA * 1000^2) %>% #population per sq-km 
+  dplyr::select(-c(AREA, NAME))
+
+county_map_risk = county_map_area %>%
+  left_join(df_plot2, by = c("GEOID"))
+gg2 = ggplot(county_map_risk)+
+  geom_sf(aes(fill = fit_mean), color = NA) + 
+  scale_fill_viridis_c(option="plasma", na.value = "grey50") +
+  theme_dark() +
+  labs(title = "Power Outage Prediction - All Events", fill = "Mean Duration\nln(Hours)") + 
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()
+  )
+print(gg2)
